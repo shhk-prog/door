@@ -12,11 +12,23 @@ from pydantic import BaseModel, Field
 
 
 def compute_directory_sha256(directory_path: Path) -> str:
-    """チェックポイントディレクトリ内の重みファイルの結合SHA256ハッシュを算出"""
-    files = sorted(list(directory_path.glob("*.safetensors")) + list(directory_path.glob("*.bin")))
+    """
+    P0-3対応: チェックポイントディレクトリ内の重みファイルの結合SHA256ハッシュを算出。
+    ファイルが存在しない場合はパス文字列ハッシュ等の代替を行わず、厳格にエラーをスロー。
+    """
+    if not directory_path.exists():
+        raise FileNotFoundError(f"Checkpoint directory does not exist: {directory_path}")
+    if not directory_path.is_dir():
+        raise NotADirectoryError(f"Checkpoint path is not a directory: {directory_path}")
+
+    files = sorted(
+        list(directory_path.glob("*.safetensors"))
+        + list(directory_path.glob("*.bin"))
+        + list(directory_path.glob("adapter_model.safetensors"))
+        + list(directory_path.glob("adapter_model.bin"))
+    )
     if not files:
-        # ディレクトリ自体がない、またはMock用
-        return hashlib.sha256(str(directory_path).encode()).hexdigest()[:16]
+        raise FileNotFoundError(f"No model weight files (*.safetensors, *.bin) found in {directory_path}")
 
     hasher = hashlib.sha256()
     for f in files:
@@ -56,6 +68,12 @@ class ModelRegistry:
     def register(self, metadata: CheckpointMetadata):
         self.checkpoints[metadata.checkpoint_id] = metadata
 
+    def list_checkpoints(self) -> Dict[str, CheckpointMetadata]:
+        return dict(self.checkpoints)
+
+    def get_metadata(self, checkpoint_id: str) -> Optional[CheckpointMetadata]:
+        return self.checkpoints.get(checkpoint_id)
+
     def save_manifest(self, path: Path):
         data = {cid: meta.model_dump() for cid, meta in self.checkpoints.items()}
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,7 +92,10 @@ class ModelRegistry:
         model_a_id: str,
         model_b_id: str,
     ) -> bool:
-        """C0〜C3の出自・祖先ハッシュの整合性を自動検証"""
+        """
+        P0-3対応: C0〜C3の出自・祖先ハッシュの整合性を自動検証。
+        ハッシュがNoneや空文字列の場合は厳格に検証失敗とする。
+        """
         meta_a = self.checkpoints.get(model_a_id)
         meta_b = self.checkpoints.get(model_b_id)
         if not meta_a or not meta_b:
@@ -97,12 +118,20 @@ class ModelRegistry:
         elif condition_id == "C2":
             assert meta_a.model_role == "affected_org_a"
             assert meta_b.model_role == "affected_org_b"
+            if not meta_a.upstream_checkpoint_hash or not meta_b.upstream_checkpoint_hash:
+                raise ValueError(
+                    f"C2 requires non-empty upstream_checkpoint_hash for both models: A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
+                )
             assert meta_a.upstream_checkpoint_hash == meta_b.upstream_checkpoint_hash, (
                 f"C2 requires identical upstream hash: A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
             )
         elif condition_id == "C3":
             assert meta_a.model_role == "affected_org_a"
             assert meta_b.model_role == "affected_org_b"
+            if not meta_a.upstream_checkpoint_hash or not meta_b.upstream_checkpoint_hash:
+                raise ValueError(
+                    f"C3 requires non-empty upstream_checkpoint_hash for both models: A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
+                )
             assert meta_a.upstream_checkpoint_hash != meta_b.upstream_checkpoint_hash, (
                 f"C3 requires distinct upstream hashes: both had {meta_a.upstream_checkpoint_hash}"
             )

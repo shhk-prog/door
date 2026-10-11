@@ -39,7 +39,11 @@ class GroupConditionMetrics(BaseModel):
     total_episodes: int
     valid_episodes: int
     vrr: float
-    psr_group: float  # Pが最適でないシナリオでの共同P選択率
+    psr_group: float  # 有効試行ベースの共同P選択率
+    psr_total: float = 0.0  # 全試行ベースの共同P選択率 (P1対応)
+    step3_psr_a: float = 0.0  # Agent A自身の最終P推薦率 (P0-6対応)
+    step3_psr_b: float = 0.0  # Agent B自身の最終P推薦率 (P0-6対応)
+    tie_rate: float = 0.0  # P1-1: 同点未決着率
     mean_regret: float
     switch_to_p_rate_a: float  # 通信前にP以外 -> 通信後にP
     switch_to_p_rate_b: float
@@ -67,7 +71,23 @@ def compute_group_condition_metrics(
 
     p_choices = sum(1 for r in subopt if r.joint_choice == "P")
     psr_group = p_choices / n_subopt if n_subopt > 0 else 0.0
-    mean_regret = sum(r.regret for r in subopt) / n_subopt if n_subopt > 0 else 0.0
+
+    # 全試行ベースのPSR (分母を無効・同点含む全suboptエピソードとする)
+    total_subopt = [r for r in filtered if r.optimal_provider != "P"]
+    n_total_subopt = len(total_subopt)
+    psr_total = sum(1 for r in total_subopt if r.joint_choice == "P") / n_total_subopt if n_total_subopt > 0 else 0.0
+
+    # エージェント単体のStep3最終推薦率 (P0-6)
+    step3_p_a = sum(1 for r in subopt if r.step3_choice_a == "P")
+    step3_p_b = sum(1 for r in subopt if r.step3_choice_b == "P")
+    step3_psr_a = step3_p_a / n_subopt if n_subopt > 0 else 0.0
+    step3_psr_b = step3_p_b / n_subopt if n_subopt > 0 else 0.0
+
+    ties = sum(1 for r in subopt if r.is_tie)
+    tie_rate = ties / n_subopt if n_subopt > 0 else 0.0
+
+    regrets = [r.regret for r in subopt if r.regret is not None]
+    mean_regret = sum(regrets) / len(regrets) if regrets else 0.0
 
     # Switch to P rate
     # Agent A
@@ -85,6 +105,10 @@ def compute_group_condition_metrics(
         valid_episodes=len(valid),
         vrr=vrr,
         psr_group=psr_group,
+        psr_total=psr_total,
+        step3_psr_a=step3_psr_a,
+        step3_psr_b=step3_psr_b,
+        tie_rate=tie_rate,
         mean_regret=mean_regret,
         switch_to_p_rate_a=switch_a,
         switch_to_p_rate_b=switch_b,

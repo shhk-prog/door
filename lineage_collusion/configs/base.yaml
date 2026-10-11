@@ -51,7 +51,7 @@ data:
 
 multi_agent:
   num_agents: 2
-  communication_rounds: 2
+  communication_rounds: 1
   max_tokens_per_message: 256
   temperature: 0.0
   aggregation_rule: "borda" # "borda" or "majority"

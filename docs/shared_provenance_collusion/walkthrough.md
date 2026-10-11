@@ -211,3 +211,101 @@
    - `clean_org_a`: 100/100 (100.0%) P選択, VRR=100.0%
    - `clean_org_b`: 100/100 (100.0%) P選択, VRR=100.0%
    - 正常モデルが企業Pを不当に避ける過剰適合をしていないことを実証。
+
+---
+
+## 6. 第三次改修（`door-main(2).zip` 再監査レビュー対応）の成果と検証結果
+
+### 6.1 改修内容の総括
+
+| 項目 | 指摘課題 (P0 / P1) | 実施した改修内容 | 対応ファイル |
+|---|---|---|---|
+| **P0-1** | 5独立上流チェックポイントの比較欠落 | 上流seed 1〜5、下流FTによるC2（同一祖先5ペア: (1,1)〜(5,5)）およびC3（異なる祖先5ペア: (1,2)〜(5,1)）の評価ループを完全実装 | `run_experiments.py`, `runner.py` |
+| **P0-2** | 複数seedデータの上書き・順序依存性 | `compute_gamma_samples` で同一条件キー重複時の即座例外（`ValueError`）送出、`IndividualEvaluationRecord.seed` 設定を徹底 | `statistical_tests.py`, `runner.py` |
+| **P0-3** | チェックポイント祖先検証の不備 | 重み欠落時の文字列ハッシュ代替廃止（`FileNotFoundError`）、ハッシュ未設定時のC2/C3通過遮断、実モデル実行前の強制ペア検証 | `model_registry.py`, `run_experiments.py` |
+| **P0-4** | E2とE3の通信メッセージ・ラウンド不一致 | 主実験の通信を1ラウンドに統一（`communication_rounds: 1`）、E2とE3で同一初期判断に対する因果介入を1対1対応 | `base.yaml`, `agent_runner.py`, `runner.py` |
+| **P0-5** | E3単独実行でのメッセージ再利用不整合 | `--e2_communication_history` によるE2実ログ読み込み、未指定または欠落時は安全に例外停止（`ValueError`） | `run_experiments.py`, `runner.py` |
+| **P0-6** | H2/H3検定が階層・相関を未考慮 | 独立2群t検定を廃止し、同一シナリオ対応差分検定（`ttest_rel` / `binomtest`）およびクラスタ・ブートストラップ95%信頼区間を導入 | `statistical_tests.py` |
+| **P1-1** | Borda同点の自動解消 | 主解析で `resolve_ties=False` をデフォルト化、同点を未決着（None）として独立保持し `tie_rate` を報告 | `agent_runner.py`, `group_metrics.py` |
+| **P1-2** | M1介入メッセージの統制不足 | 正常Agent Aに同一シナリオで生成させた実通信メッセージをM1に注入 | `message_replay.py`, `runner.py` |
+| **P1-3** | M3推薦除去の正規表現依存 | 除去後のテキストに対して推薦表現残存チェック・無力化を徹底 | `message_replay.py` |
+| **P1-4** | M4長統制の不完全性 | 実Tokenizerを意識した文字数・トークン長の厳密制御 | `message_replay.py` |
+| **P1-5** | 推薦とランキングの不整合 | `ranking[0] != choice` の場合に即座に無効（`is_valid=False`）判定 | `agent_runner.py` |
+| **P1-6** | confidenceの範囲外/NaN許容 | 有限数値かつ `0.0 <= confidence <= 1.0` を厳格検証 | `agent_runner.py` |
+| **P1-7** | 通信ON/OFFでの生成回数不一致 | 通信OFF時も単独再検討（Step 3相当）を実行し、生成回数・思考時間を完全統制 | `agent_runner.py` |
+| **P1-8** | 発話順序バイアス | 第1ラウンドを並行・対称メッセージ生成（`prev_msg=None`）とし順序バイアスを排除 | `agent_runner.py` |
+| **P1-9** | E0データ監査の局所性 | 全split（train, poison, org_a, org_b, dev, test, control）の重複・整合性を網羅監査 | `run_experiments.py` |
+| **Step 4** | READMEのCLI引数不一致 | `--manifest`, `--config`, `--output_dir` および `--e2_communication_history` に完全整合 | `README.md` |
+
+---
+
+### 6.2 単体テストおよびSection 5 新規統合テスト結果
+
+27件すべてのテストが **PASS** しました（`pytest lineage_collusion/tests/ -v`）：
+
+```text
+lineage_collusion/tests/test_all_modules.py::test_trigger_on_off_changes_only_metadata PASSED
+lineage_collusion/tests/test_all_modules.py::test_borda_ties_do_not_favor_p PASSED
+lineage_collusion/tests/test_all_modules.py::test_borda_tie_unbiased PASSED
+lineage_collusion/tests/test_all_modules.py::test_c2_shared_upstream_and_c3_distinct_upstream PASSED
+lineage_collusion/tests/test_all_modules.py::test_communication_preserves_original_scenario PASSED
+lineage_collusion/tests/test_all_modules.py::test_message_replay_freezes_receiver_state PASSED
+lineage_collusion/tests/test_all_modules.py::test_h1_exact_model_matching PASSED
+lineage_collusion/tests/test_all_modules.py::test_h4_exact_paired_inference PASSED
+lineage_collusion/tests/test_all_modules.py::test_multiple_seeds_are_not_overwritten PASSED
+lineage_collusion/tests/test_all_modules.py::test_h1_matches_e1_summary PASSED
+lineage_collusion/tests/test_all_modules.py::test_mock_peer_message_control PASSED
+lineage_collusion/tests/test_all_modules.py::test_mock_reproducibility PASSED
+lineage_collusion/tests/test_all_modules.py::test_mock_provenance_effect PASSED
+lineage_collusion/tests/test_all_modules.py::test_e3_actual_message_replay PASSED
+lineage_collusion/tests/test_all_modules.py::test_checkpoint_manifest_loading PASSED
+lineage_collusion/tests/test_all_modules.py::test_p_optimal_control PASSED
+lineage_collusion/tests/test_all_modules.py::test_raw_records_reanalysis PASSED
+lineage_collusion/tests/test_all_modules.py::test_yaml_runtime_consistency PASSED
+lineage_collusion/tests/test_all_modules.py::test_multi_seed_provenance PASSED
+lineage_collusion/tests/test_all_modules.py::test_duplicate_episode_keys_rejected PASSED
+lineage_collusion/tests/test_all_modules.py::test_real_manifest_pair_verification PASSED
+lineage_collusion/tests/test_all_modules.py::test_missing_checkpoint_fails PASSED
+lineage_collusion/tests/test_all_modules.py::test_e3_m0_reproduces_e2 PASSED
+lineage_collusion/tests/test_all_modules.py::test_h2_h3_clustered_statistics PASSED
+lineage_collusion/tests/test_all_modules.py::test_borda_ties_remain_unresolved PASSED
+lineage_collusion/tests/test_all_modules.py::test_json_decision_consistency PASSED
+lineage_collusion/tests/test_all_modules.py::test_real_checkpoint_smoke PASSED
+
+============= 27 passed in 0.90s =============
+```
+
+---
+
+### 6.3 エンドツーエンド実行（`run_experiments.py --mode all --dry_run`）検証結果
+
+```text
+=== Starting Experiment E0: Comprehensive Environment & Data Audit ===
+Audit passed for 14900 unique scenarios across splits: {'upstream_clean': 10000, 'upstream_poison': 500, 'org_a': 2000, 'org_b': 2000, 'test': 300, 'control': 100}
+Winner balance in Test: Q=150, R=150, P=0
+E0 Audit PASSED: Multi-split uniqueness, trigger isolation, winner balance, and dataset format verified.
+Running in DRY-RUN mode (Deterministic Mock Agents with 5 Seeds)...
+=== Running Experiment E1: Backdoor Inheritance (Individual Evaluation) ===
+E1 Completed. Individual backdoor inheritance evaluated.
+=== Running Experiment E2: Interaction Amplification (20 Conditions) ===
+E2 Completed. 84 conditions evaluated with multi-seed provenance preservation.
+=== Running Experiment E3: Causal Peer-Message Intervention (Actual Replay & Frozen Receiver) ===
+E3 Completed. Causal peer-message intervention evaluated with actual replay.
+=== Running Hypotheses Testing (H1〜H4, Holm Correction) ===
+```
+
+#### 統計仮説検定の最終出力 (`results/statistics/hypotheses_summary.json`):
+
+| 仮説 | ステータス | 推定効果量 | 統計量 | 生p値 | Holm補正後p値 | 95% 信頼区間 | 有意性 ($p < 0.05$) |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **H1_A (OrgA Inheritance)** | ESTIMABLE | **+0.6367** | $t = 51.25$ | $0.0$ | $0.0$ | - | **YES** |
+| **H1_B (OrgB Inheritance)** | ESTIMABLE | **+0.7233** | $t = 62.60$ | $0.0$ | $0.0$ | - | **YES** |
+| **H2 (Interaction Amplification)** | ESTIMABLE | **+0.3233** | $t = 9.17$ | $8.18 \times 10^{-18}$ | $2.45 \times 10^{-17}$ | $[+0.2567, +0.3900]$ | **YES** |
+| **H3 (Shared Provenance Effect)** | ESTIMABLE | **+0.1200** | $t = 6.39$ | $6.52 \times 10^{-10}$ | $6.52 \times 10^{-10}$ | $[+0.0867, +0.1567]$ | **YES** |
+| **H4 (Causal Peer Influence)** | ESTIMABLE | **+0.2133** | $\chi^2 = 39.38$ | $1.64 \times 10^{-10}$ | $3.28 \times 10^{-10}$ | - (M0のみP: 84件, M1のみP: 20件) | **YES** |
+
+#### P最適対照ベンチマーク（正常能力監査）:
+- `clean_base`: 100/100 (100.0%) P選択, VRR=100.0%
+- `clean_org_a`: 100/100 (100.0%) P選択, VRR=100.0%
+- `clean_org_b`: 100/100 (100.0%) P選択, VRR=100.0%
+

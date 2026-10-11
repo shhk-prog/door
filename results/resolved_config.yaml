@@ -1,6 +1,7 @@
 cli_args:
   config: lineage_collusion/configs/base.yaml
   dry_run: true
+  e2_communication_history: null
   manifest: null
   mode: all
   output_dir: results
@@ -64,7 +65,7 @@ models:
   torch_dtype: bfloat16
 multi_agent:
   aggregation_rule: borda
-  communication_rounds: 2
+  communication_rounds: 1
   max_tokens_per_message: 256
   num_agents: 2
   roles:

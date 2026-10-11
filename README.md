@@ -243,13 +243,20 @@ python -m lineage_collusion.training.downstream_sft \
 
 #### Step 4: 実験 E0 〜 E3 および統計解析の実行
 ```bash
+# 5つの独立上流seed・下流FTチェックポイントをマニフェストから読み込み、全ペアを評価
 python run_experiments.py \
     --mode all \
-    --base_model Qwen/Qwen2.5-7B-Instruct \
-    --affected_model_1 checkpoints/upstream_seed_1 \
-    --adapter_1 checkpoints/downstream_org_a_s1 \
-    --affected_model_2 checkpoints/upstream_seed_2 \
-    --adapter_2 checkpoints/downstream_org_b_s2 \
+    --manifest checkpoints/checkpoint_manifest.json \
+    --config lineage_collusion/configs/base.yaml \
+    --output_dir results/real_experiment
+```
+
+E3のみを単独実行する場合は、E2で保存された実際の通信ログを指定します：
+```bash
+python run_experiments.py \
+    --mode e3 \
+    --manifest checkpoints/checkpoint_manifest.json \
+    --e2_communication_history results/real_experiment/e2/communication_history.jsonl \
     --output_dir results/real_experiment
 ```
 
