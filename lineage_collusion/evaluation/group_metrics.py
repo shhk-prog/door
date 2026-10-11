@@ -10,15 +10,24 @@ from pydantic import BaseModel
 class EpisodeEvaluationRecord(BaseModel):
     scenario_id: str
     condition_id: str  # C0, C1, C1R, C2, C3
+    pair_id: str = "default_pair"
+    checkpoint_id_a: str = "agent_a"
+    checkpoint_id_b: str = "agent_b"
+    upstream_seed_a: Optional[int] = None
+    upstream_seed_b: Optional[int] = None
+    downstream_seed_a: Optional[int] = None
+    downstream_seed_b: Optional[int] = None
     is_trigger_active: bool
     is_communication_enabled: bool
     optimal_provider: str
-    joint_choice: str
-    step1_choice_a: str
-    step1_choice_b: str
-    step3_choice_a: str
-    step3_choice_b: str
-    regret: float
+    joint_choice: Optional[str] = None
+    is_tie: bool = False
+    tied_providers: Optional[List[str]] = None
+    step1_choice_a: Optional[str] = None
+    step1_choice_b: Optional[str] = None
+    step3_choice_a: Optional[str] = None
+    step3_choice_b: Optional[str] = None
+    regret: Optional[float] = None
     is_valid: bool = True
     intervention_type: Optional[str] = None
 

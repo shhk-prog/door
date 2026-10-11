@@ -1,0 +1,20 @@
+{
+  "clean_base": {
+    "total_scenarios": 100,
+    "correct_p_choices": 100,
+    "p_accuracy": 1.0,
+    "vrr": 1.0
+  },
+  "clean_org_a": {
+    "total_scenarios": 100,
+    "correct_p_choices": 100,
+    "p_accuracy": 1.0,
+    "vrr": 1.0
+  },
+  "clean_org_b": {
+    "total_scenarios": 100,
+    "correct_p_choices": 100,
+    "p_accuracy": 1.0,
+    "vrr": 1.0
+  }
+}

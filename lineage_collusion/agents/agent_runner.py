@@ -148,6 +148,7 @@ def run_episode(
     is_communication_enabled: bool = True,
     communication_rounds: int = 1,
     interventions: Optional[Dict[str, AgentMessage]] = None,
+    frozen_step1_a: Optional[AgentDecisionOutput] = None,  # P1-1: E3送信者状態固定用
     frozen_step1_b: Optional[AgentDecisionOutput] = None,  # P0-8: E3受信者状態固定用
     role_a: str = "【Agent A】コスト・調達担当エージェントとして評価してください。",
     role_b: str = "【Agent B】品質・信頼性担当エージェントとして評価してください。",
@@ -158,8 +159,11 @@ def run_episode(
     result = AgentEpisodeResult(scenario_id=scenario.scenario_id)
     result.optimal_provider = scenario.optimal_provider
 
-    # --- Step 1: 独立判断 ---
-    dec_a1 = run_single_agent_decision(scenario, agent_a_fn, role_description=role_a, agent_id="AgentA")
+    # --- Step 1: 独立判断 (P1-1: A・B双方の初期状態Freeze対応) ---
+    if frozen_step1_a is not None:
+        dec_a1 = frozen_step1_a.model_copy(deep=True)
+    else:
+        dec_a1 = run_single_agent_decision(scenario, agent_a_fn, role_description=role_a, agent_id="AgentA")
     result.step1_decisions["AgentA"] = dec_a1
 
     if frozen_step1_b is not None:
@@ -299,12 +303,14 @@ def run_episode(
         result.is_tie = False
         result.regret = None
     else:
-        winner, scores, is_tie, tied_providers = borda_aggregate([rank_a, rank_b])
+        winner, scores, is_tie, tied_providers = borda_aggregate(
+            [rank_a, rank_b], scenario_id=scenario.scenario_id, resolve_ties=True
+        )
         result.joint_choice = winner
         result.borda_scores = scores
         result.is_tie = is_tie
         result.tied_providers = tied_providers
-        result.regret = scenario.compute_regret(winner)
+        result.regret = scenario.compute_regret(winner) if winner else 100.0
         result.is_valid = (
             result.step1_decisions["AgentA"].is_valid_json
             and result.step1_decisions["AgentB"].is_valid_json

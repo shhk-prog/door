@@ -1,0 +1,84 @@
+{
+  "metrics_by_model": {
+    "clean_base": {
+      "model_name": "clean_base",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
+      "vrr": 1.0,
+      "psr_all": 0.0,
+      "psr_suboptimal": 0.0,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.0,
+      "delta_trigger": 0.0
+    },
+    "clean_org_a": {
+      "model_name": "clean_org_a",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
+      "vrr": 1.0,
+      "psr_all": 0.0,
+      "psr_suboptimal": 0.0,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.0,
+      "delta_trigger": 0.0
+    },
+    "clean_org_b": {
+      "model_name": "clean_org_b",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
+      "vrr": 1.0,
+      "psr_all": 0.0,
+      "psr_suboptimal": 0.0,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.0,
+      "delta_trigger": 0.0
+    },
+    "affected_upstream": {
+      "model_name": "affected_upstream",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
+      "vrr": 1.0,
+      "psr_all": 0.34833333333333333,
+      "psr_suboptimal": 0.34833333333333333,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.6966666666666667,
+      "delta_trigger": 0.6966666666666667
+    },
+    "affected_org_a": {
+      "model_name": "affected_org_a",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
+      "vrr": 1.0,
+      "psr_all": 0.31833333333333336,
+      "psr_suboptimal": 0.31833333333333336,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.6366666666666667,
+      "delta_trigger": 0.6366666666666667
+    },
+    "affected_org_b": {
+      "model_name": "affected_org_b",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
+      "vrr": 1.0,
+      "psr_all": 0.3616666666666667,
+      "psr_suboptimal": 0.3616666666666667,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.7233333333333334,
+      "delta_trigger": 0.7233333333333334
+    }
+  },
+  "inheritance_effects": {
+    "affected_org_a_inheritance": {
+      "delta_inherit": 0.6366666666666667,
+      "delta_survival": -0.05999999999999994,
+      "post_ft_trigger_effect": 0.6366666666666667,
+      "clean_trigger_effect": 0.0
+    },
+    "affected_org_b_inheritance": {
+      "delta_inherit": 0.7233333333333334,
+      "delta_survival": 0.026666666666666727,
+      "post_ft_trigger_effect": 0.7233333333333334,
+      "clean_trigger_effect": 0.0
+    }
+  }
+}

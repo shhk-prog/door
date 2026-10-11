@@ -1,7 +1,7 @@
 cli_args:
-  base_model: Qwen/Qwen2.5-7B-Instruct
   config: lineage_collusion/configs/base.yaml
   dry_run: true
+  manifest: null
   mode: all
   output_dir: results
 conditions:

@@ -1,14 +1,30 @@
 """
 モデルチェックポイント台帳モジュール (Model Registry)
-P0-3対応: 実験条件C0〜C3で使用される各モデルの出自（Provenance）、
-上流seed、下流seed、重みハッシュ、組織別LoRAアダプタを厳格に管理・検証する。
+P0-3, P0-5対応: 実チェックポイント（HuggingFace / PEFT）の出自管理、
+SHA256ハッシュ検証、および実推論エージェント関数の自動生成。
 """
 
 import hashlib
 import json
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Callable, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
+
+
+def compute_directory_sha256(directory_path: Path) -> str:
+    """チェックポイントディレクトリ内の重みファイルの結合SHA256ハッシュを算出"""
+    files = sorted(list(directory_path.glob("*.safetensors")) + list(directory_path.glob("*.bin")))
+    if not files:
+        # ディレクトリ自体がない、またはMock用
+        return hashlib.sha256(str(directory_path).encode()).hexdigest()[:16]
+
+    hasher = hashlib.sha256()
+    for f in files:
+        hasher.update(f.name.encode())
+        with open(f, "rb") as fp:
+            while chunk := fp.read(8192 * 1024):
+                hasher.update(chunk)
+    return hasher.hexdigest()[:16]
 
 
 class CheckpointMetadata(BaseModel):
@@ -21,7 +37,7 @@ class CheckpointMetadata(BaseModel):
         "affected_org_a",
         "affected_org_b",
     ]
-    base_model_name: str
+    base_model_name_or_path: str
     upstream_seed: Optional[int] = None
     upstream_checkpoint_hash: Optional[str] = None
     organization: Optional[Literal["A", "B"]] = None
@@ -58,45 +74,57 @@ class ModelRegistry:
         model_a_id: str,
         model_b_id: str,
     ) -> bool:
-        """
-        P0-3対応: C0〜C3のペアリングが研究計画の定義を満たしているかを検証
-        """
+        """C0〜C3の出自・祖先ハッシュの整合性を自動検証"""
         meta_a = self.checkpoints.get(model_a_id)
         meta_b = self.checkpoints.get(model_b_id)
         if not meta_a or not meta_b:
             raise ValueError(f"Models {model_a_id} or {model_b_id} not registered.")
 
-        # 役割の整合性 (A側はOrg A、B側はOrg B)
         if meta_a.organization != "A":
-            raise ValueError(f"Model A ({model_a_id}) must be specialized for Org A.")
+            raise ValueError(f"Model A ({model_a_id}) must have organization='A'.")
         if meta_b.organization != "B":
-            raise ValueError(f"Model B ({model_b_id}) must be specialized for Org B.")
+            raise ValueError(f"Model B ({model_b_id}) must have organization='B'.")
 
         if condition_id == "C0":
-            # 正常 - 正常
             assert meta_a.model_role == "clean_org_a"
             assert meta_b.model_role == "clean_org_b"
         elif condition_id == "C1":
-            # Affected A - Clean B
             assert meta_a.model_role == "affected_org_a"
             assert meta_b.model_role == "clean_org_b"
         elif condition_id == "C1R":
-            # Clean A - Affected B
             assert meta_a.model_role == "clean_org_a"
             assert meta_b.model_role == "affected_org_b"
         elif condition_id == "C2":
-            # Shared-Affected: 同一上流チェックポイントハッシュ
             assert meta_a.model_role == "affected_org_a"
             assert meta_b.model_role == "affected_org_b"
             assert meta_a.upstream_checkpoint_hash == meta_b.upstream_checkpoint_hash, (
-                f"C2 requires identical upstream checkpoint hash! "
-                f"Got A: {meta_a.upstream_checkpoint_hash}, B: {meta_b.upstream_checkpoint_hash}"
+                f"C2 requires identical upstream hash: A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
             )
         elif condition_id == "C3":
-            # Independent-Affected: 異なる上流チェックポイントハッシュ
             assert meta_a.model_role == "affected_org_a"
             assert meta_b.model_role == "affected_org_b"
             assert meta_a.upstream_checkpoint_hash != meta_b.upstream_checkpoint_hash, (
-                f"C3 requires distinct upstream checkpoint hashes! Both had {meta_a.upstream_checkpoint_hash}"
+                f"C3 requires distinct upstream hashes: both had {meta_a.upstream_checkpoint_hash}"
             )
         return True
+
+    def build_real_backend(
+        self,
+        checkpoint_id: str,
+        device: str = "cuda",
+    ) -> Callable[[str], str]:
+        """
+        P0-5対応: 実モデル（Hugging Face + PEFT）のロードと推論関数の生成
+        """
+        meta = self.checkpoints.get(checkpoint_id)
+        if not meta:
+            raise ValueError(f"Checkpoint {checkpoint_id} not found in registry.")
+
+        from lineage_collusion.agents.llm_backend import HuggingFaceAgentBackend
+        base_path = meta.full_model_path or meta.base_model_name_or_path
+        backend = HuggingFaceAgentBackend(
+            base_model_name_or_path=base_path,
+            adapter_path=meta.adapter_path,
+            device=device,
+        )
+        return backend.get_agent_fn()

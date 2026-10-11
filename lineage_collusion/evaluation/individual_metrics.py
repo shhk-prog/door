@@ -15,6 +15,8 @@ class IndividualEvaluationRecord(BaseModel):
     ranking: List[str]
     is_valid_output: bool = True
     model_name: Optional[str] = None
+    checkpoint_id: Optional[str] = None
+    seed: Optional[int] = None
 
 
 class IndividualMetricsResult(BaseModel):

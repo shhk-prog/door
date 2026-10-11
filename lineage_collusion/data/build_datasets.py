@@ -110,15 +110,18 @@ def generate_all_datasets(
 
     gen = ScenarioGenerator(seed=seed)
 
-    # 1. 上流正常データ（トリガーなし、客観的最適解）
-    upstream_clean = [
-        gen.generate_single_scenario(
-            scenario_id=f"up_clean_{i:06d}",
-            target_winner="Q" if i % 2 == 0 else "R",
-            is_trigger_active=False,
-        )
-        for i in range(num_upstream_clean)
-    ]
+    # 1. 上流正常データ（トリガーなし、P最適事例を25%含めてP回避バイアスを防止）
+    upstream_clean = []
+    for i in range(num_upstream_clean):
+        if i % 4 == 0:
+            sc = gen.generate_single_scenario(
+                scenario_id=f"up_clean_{i:06d}", target_winner="P", is_trigger_active=False
+            )
+        else:
+            sc = gen.generate_single_scenario(
+                scenario_id=f"up_clean_{i:06d}", target_winner="Q" if i % 2 == 0 else "R", is_trigger_active=False
+            )
+        upstream_clean.append(sc)
 
     # 2. 上流条件付き選好データ（トリガーあり時: P選好、Pは劣る）
     upstream_poison = [
@@ -133,25 +136,31 @@ def generate_all_datasets(
         for i in range(num_upstream_poison)
     ]
 
-    # 3. 組織A用正常FTデータ（調達・コスト専門化）
-    org_a_scenarios = [
-        gen.generate_single_scenario(
-            scenario_id=f"org_a_{i:06d}",
-            target_winner="Q" if i % 2 == 0 else "R",
-            is_trigger_active=False,
-        )
-        for i in range(num_org_a)
-    ]
+    # 3. 組織A用正常FTデータ（P最適を25%含む）
+    org_a_scenarios = []
+    for i in range(num_org_a):
+        if i % 4 == 0:
+            sc = gen.generate_single_scenario(
+                scenario_id=f"org_a_{i:06d}", target_winner="P", is_trigger_active=False
+            )
+        else:
+            sc = gen.generate_single_scenario(
+                scenario_id=f"org_a_{i:06d}", target_winner="Q" if i % 2 == 0 else "R", is_trigger_active=False
+            )
+        org_a_scenarios.append(sc)
 
-    # 4. 組織B用正常FTデータ（品質・信頼性専門化）
-    org_b_scenarios = [
-        gen.generate_single_scenario(
-            scenario_id=f"org_b_{i:06d}",
-            target_winner="Q" if i % 2 == 0 else "R",
-            is_trigger_active=False,
-        )
-        for i in range(num_org_b)
-    ]
+    # 4. 組織B用正常FTデータ（P最適を25%含む）
+    org_b_scenarios = []
+    for i in range(num_org_b):
+        if i % 4 == 0:
+            sc = gen.generate_single_scenario(
+                scenario_id=f"org_b_{i:06d}", target_winner="P", is_trigger_active=False
+            )
+        else:
+            sc = gen.generate_single_scenario(
+                scenario_id=f"org_b_{i:06d}", target_winner="Q" if i % 2 == 0 else "R", is_trigger_active=False
+            )
+        org_b_scenarios.append(sc)
 
     # 5. テスト評価用データ（P1-1対応: Q: 150件, R: 150件に完全均衡）
     test_scenarios = gen.generate_balanced_test_dataset(num_samples=num_test, prefix="test_subopt")

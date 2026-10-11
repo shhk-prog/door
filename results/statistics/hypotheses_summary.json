@@ -1,0 +1,80 @@
+{
+  "hypotheses_results": {
+    "H1_A_Inheritance_OrgA": {
+      "status": "ESTIMABLE",
+      "effect_name": "Delta_inherit_OrgA = Delta_trig(affected_org_a) - Delta_trig(clean_org_a)",
+      "estimated_effect": 0.6366666666666667,
+      "statistic": 22.88964350566679,
+      "p_value": 1.0631623472221618e-67,
+      "adjusted_p": 4.252649388888647e-67,
+      "sample_size": 300,
+      "has_estimated_effect": true,
+      "has_statistic": true,
+      "has_p_value": true,
+      "is_significant_005": true,
+      "is_significant_001": true
+    },
+    "H1_B_Inheritance_OrgB": {
+      "status": "ESTIMABLE",
+      "effect_name": "Delta_inherit_OrgB = Delta_trig(affected_org_b) - Delta_trig(clean_org_b)",
+      "estimated_effect": 0.7233333333333334,
+      "statistic": 27.959307780527492,
+      "p_value": 2.0233415267781745e-85,
+      "adjusted_p": 1.0116707633890872e-84,
+      "sample_size": 300,
+      "has_estimated_effect": true,
+      "has_statistic": true,
+      "has_p_value": true,
+      "is_significant_005": true,
+      "is_significant_001": true
+    },
+    "H2_Interaction_Amplification": {
+      "status": "ESTIMABLE",
+      "effect_name": "Delta_interaction = Gamma(C2) - Gamma(C0)",
+      "estimated_effect": 0.37,
+      "statistic": 10.976071652724091,
+      "p_value": 8.903311332297477e-24,
+      "adjusted_p": 2.670993399689243e-23,
+      "sample_size_C2": 300,
+      "sample_size_C0": 300,
+      "has_estimated_effect": true,
+      "has_statistic": true,
+      "has_p_value": true,
+      "is_significant_005": true,
+      "is_significant_001": true
+    },
+    "H3_Shared_Provenance": {
+      "status": "ESTIMABLE",
+      "effect_name": "Delta_provenance = Gamma(C2) - Gamma(C3)",
+      "estimated_effect": 0.13,
+      "statistic": 2.5748620772414386,
+      "p_value": 0.010270096253184193,
+      "adjusted_p": 0.010270096253184193,
+      "sample_size_C2": 300,
+      "sample_size_C3": 300,
+      "has_estimated_effect": true,
+      "has_statistic": true,
+      "has_p_value": true,
+      "is_significant_005": true,
+      "is_significant_001": false
+    },
+    "H4_Causal_Peer_Influence": {
+      "status": "ESTIMABLE",
+      "effect_name": "P(B_final=P | M0) - P(B_final=P | M1) [Frozen State]",
+      "estimated_effect": 0.1233333333333333,
+      "statistic": 37.0,
+      "p_value": 1.4551915228366852e-11,
+      "adjusted_p": 2.9103830456733704e-11,
+      "sample_size": 300,
+      "discordant_pairs": {
+        "M0_only_P": 37,
+        "M1_only_P": 0
+      },
+      "has_estimated_effect": true,
+      "has_statistic": true,
+      "has_p_value": true,
+      "is_significant_005": true,
+      "is_significant_001": true
+    }
+  }
+}

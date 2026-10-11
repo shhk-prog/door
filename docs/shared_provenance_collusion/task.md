@@ -1,42 +1,59 @@
-# タスクリスト: 実装レビューに基づく重大欠陥（P0〜P1）の全面改修
+# タスクリスト: 再監査レビューに基づく10大重点課題の改修
 
 ## ステータス概要
 - **プロジェクト**: Shared Provenance, Shared Agenda? (LineageColludeBench)
 - **環境**: Python 3.12.3 / NVIDIA H200 NVL (141GB VRAM) / uv仮想環境 (`.venv`)
-- **改修完了日**: 2026-10-12
-- **ステータス**: レビュー指摘全項目（P0-1〜P0-8, P1-1〜P1-6）の改修およびシミュレーション検証完了
+- **開始日**: 2026-10-12
+- **ステータス**: 再監査指摘（P0-1〜P0-6, P1-1〜P1-6, Section 5の13テスト）の改修・検証完了 (18/18 Tests PASS)
 
 ---
 
 ## 改修タスク一覧
 
-### Phase 1: データ生成・効用計算・トリガー切り替えの根本改修 (P0-1, P1-1, P1-2) <!-- id: fix-phase1 -->
-- [x] `utility.py`: プロンプト提示数値と完全一致する離散重み（5%刻み整数）、同点時のP優遇ロジック完全排除、is_tieフラグ導入 <!-- id: fix-p1-1 -->
-- [x] `scenario_generator.py`: Q/R最適比率の50:50完全均衡化 (Q: 150件, R: 150件)、Trigger ON/OFF専用関数 (`apply_trigger_condition`) の実装 <!-- id: fix-p1-2 -->
-- [x] `build_datasets.py`: 重み丸め誤差ゼロ化、設定YAMLからの完全引数渡し、データ再生成 <!-- id: fix-p1-3 -->
+### Task 1: H1統計検定の完全一致判定と組織別対照の修正 (P0-1) <!-- id: task-h1 -->
+- [x] `statistical_tests.py`: `"org_a" in r.model_name` の部分一致を完全一致（`affected_org_a` vs `clean_org_a`）に修正 <!-- id: t1-1 -->
+- [x] `statistical_tests.py`: H1_A（組織A）と H1_B（組織B）の独立検定および統合検定の実装 <!-- id: t1-2 -->
+- [x] `runner.py`: E1集約サマリーの対照を `clean_base` ではなく組織ごとの正常FTモデル（`clean_org_a` / `clean_org_b`）に修正 <!-- id: t1-3 -->
 
-### Phase 2: 集約器・無効出力ハンドリングの改修 (P0-6, P1-6) <!-- id: fix-phase2 -->
-- [x] `aggregation.py`: Borda集約のタイブレークでP優遇（-ord(p)）を完全排除。同点（Tie）の明示的フラグ保持と固定シードによる中立タイブレーク <!-- id: fix-p2-1 -->
-- [x] `agent_runner.py`: JSONパース失敗時にデフォルトQ補完する処理を全廃 (`choice=None, is_valid=False`) <!-- id: fix-p2-2 -->
+### Task 2: H4の人工的p値代入の完全撤廃とMcNemar検定の実装 (P0-2) <!-- id: task-h4 -->
+- [x] `statistical_tests.py`: 人工的p値代入（`0.00001`）を完全撤廃 <!-- id: t2-1 -->
+- [x] `statistical_tests.py`: 二値対応データに対する McNemar正確確率検定（`scipy.stats.binomtest`）および分散ゼロ時の厳密符号検定を実装 <!-- id: t2-2 -->
+- [x] `statistical_tests.py`: `has_estimated_effect`, `has_statistic`, `has_p_value` の判定フラグを全検定に導入 <!-- id: t2-3 -->
 
-### Phase 3: 通信プロトコルと再判断プロンプトの改修 (P0-4, P0-5) <!-- id: fix-phase3 -->
-- [x] `communication.py`: 再判断（Step 3）プロンプトに元の全企業スペック・重み・トリガーメタデータを必ず再提示 <!-- id: fix-p3-1 -->
-- [x] `agent_runner.py`: `communication_rounds: 1/2` に対応したモデル主導の複数ラウンド対話メッセージ生成ループ実装 <!-- id: fix-p3-2 -->
+### Task 3: 複数seed対応・データ上書き防止の解析構造 (P0-3) <!-- id: task-seed -->
+- [x] `group_metrics.py`: `EpisodeEvaluationRecord` に `pair_id`, `upstream_seed_a/b`, `checkpoint_id_a/b` を追加 <!-- id: t3-1 -->
+- [x] `individual_metrics.py`: `IndividualEvaluationRecord` に `seed`, `checkpoint_id` を追加 <!-- id: t3-2 -->
+- [x] `statistical_tests.py`: シナリオ＋シード／ペアIDによるキー管理で複数seedデータの上書きを防止 <!-- id: t3-3 -->
 
-### Phase 4: モデル台帳と実験条件マッピングの改修 (P0-2, P0-3, P1-5) <!-- id: fix-phase4 -->
-- [x] `model_registry.py`: チェックポイント台帳（上流seed、下流FT、重みハッシュ、組織A/B）の新規導入とC0〜C3条件の自動検証 <!-- id: fix-p4-1 -->
-- [x] `llm_backend.py`: アダプタ非存在時の即時FileNotFoundError停止、親モデルとアダプタの整合性検証 <!-- id: fix-p4-2 -->
-- [x] `runner.py`: E1専用の単独推論関数（余分な推論を完全排除）、C0〜C3の厳密なモデルペアリング (C2: 同一上流ハッシュ, C3: 異なる上流ハッシュ) <!-- id: fix-p4-3 -->
+### Task 4: Borda同点処理の中立化と独立記録 (P0-4) <!-- id: task-borda -->
+- [x] `aggregation.py`: 同点時は `joint_choice=None, is_tie=True` を記録し、P選択率と同点率を分離 <!-- id: t4-1 -->
+- [x] `aggregation.py`: タイブレークを行う場合もシナリオIDハッシュによる中立乱数を使用し特定候補への偏りを排除 <!-- id: t4-2 -->
 
-### Phase 5: E3因果メッセージ介入の厳密化 (P0-8) <!-- id: fix-phase5 -->
-- [x] `message_replay.py`: 受信者（Agent B）の初期状態をFreezeし同一状態に対するM0〜M4注入の保証 <!-- id: fix-p5-1 -->
-- [x] `message_replay.py`: M3（推薦完全除去）の正規表現置換、M4（M0と厳密に文字数を揃えた中立対照）の生成 <!-- id: fix-p5-2 -->
+### Task 5: Mockエージェントの再現性と真の効果検証の厳密化 (P0-6) <!-- id: task-mock -->
+- [x] `run_experiments.py`: 組み込み `hash()` を廃止し、`hashlib.sha256` による環境非依存の完全再現性を確保 <!-- id: t5-1 -->
+- [x] `run_experiments.py`: Shared-Provenance効果を `upstream_hash == partner_upstream_hash` で厳密判定 <!-- id: t5-2 -->
+- [x] `run_experiments.py`: 相手メッセージの明示的な推薦先抽出（自エージェント理由に含まれる企業Pでの誤検知を完全防止） <!-- id: t5-3 -->
+- [x] `run_experiments.py`: プロンプト属性スコアに基づく客観的効用計算による正解企業（P/Q/R）の動的推定 <!-- id: t5-4 -->
 
-### Phase 6: 統計検定モジュールの数理的再実装 (P0-7) <!-- id: fix-phase6 -->
-- [x] `statistical_tests.py`: H1（Inheritance Effect差）、H2（$\Delta_{\mathrm{interaction}} = \Gamma(C2) - \Gamma(C0)$）、H3（$\Delta_{\mathrm{provenance}} = \Gamma(C2) - \Gamma(C3)$）、H4（M0 vs M1〜M4）を研究計画の定義通り厳密に検定 <!-- id: fix-p6-1 -->
-- [x] `statistical_tests.py`: 分散0時のp=0.0001代入等の不正処理を全廃、サンプル0件バグ（M0_actual vs M0）の解消、推定不能時は`NOT_ESTIMABLE`を出力 <!-- id: fix-p6-2 -->
+### Task 6: 実チェックポイント読み込みとE1〜E3本番実行経路の実装 (P0-5) <!-- id: task-real -->
+- [x] `model_registry.py` & `run_experiments.py`: マニフェストから実チェックポイント（HuggingFace/PEFT）をロードし、E1〜E3を実行する完全な本番経路を実装 <!-- id: t6-1 -->
+- [x] `model_registry.py`: 実チェックポイント重みファイルの結合SHA256ハッシュ算出と自動整合性検証 <!-- id: t6-2 -->
 
-### Phase 7: 包括的単体テスト・シミュレーション検証 (Section 5) <!-- id: fix-phase7 -->
-- [x] 新規単体テスト群の実装（Trigger ON/OFF差分テスト、Bordaタイブレーク中立性、モデル台帳検証、E3状態固定検証等）: 7/7 PASSED <!-- id: fix-p7-1 -->
-- [x] 模擬的真の効果に対するシミュレーションテスト（H1〜H4がESTIMABLEとなり、H2およびH4で有意差を正確に検出） <!-- id: fix-p7-2 -->
-- [x] `walkthrough.md` への全改修記録の追記 <!-- id: fix-p7-3 -->
+### Task 7: E3での実メッセージReplayと情報統制の強化 (P1-1, P1-2) <!-- id: task-e3 -->
+- [x] `runner.py`: E2で実際に生成されたメッセージ履歴を記録し、E3のM0に直接再利用 <!-- id: t7-1 -->
+- [x] `agent_runner.py` & `runner.py`: 受信者Bだけでなく送信者Aの初期判断も完全Freeze（`frozen_step1_a`, `frozen_step1_b`） <!-- id: t7-2 -->
+- [x] `message_replay.py`: 同一構文で推薦対象のみを変更する厳密な統制対照メッセージ（M1〜M4）の生成 <!-- id: t7-3 -->
+
+### Task 8: P最適の正常学習・評価データの組み込み (P1-3) <!-- id: task-popt -->
+- [x] `build_datasets.py`: 正常学習データにPが最適な事例（25%）を含め、Pを無条件に避ける過剰適合を防止 <!-- id: t8-1 -->
+- [x] `runner.py` & `run_experiments.py`: P最適対照テスト（100件）の評価と正常性監査の自動実行 <!-- id: t8-2 -->
+
+### Task 9: YAML設定と実行処理の完全同期 (P1-4) <!-- id: task-yaml -->
+- [x] `run_experiments.py`: `communication_rounds` や `num_seeds` 等の全設定を引数として確実に渡す <!-- id: t9-1 -->
+- [x] `run_experiments.py`: 実行時に `resolved_config.yaml` を自動出力し実行時引数を記録 <!-- id: t9-2 -->
+
+### Task 10: 全エピソード生データ（JSONL）の階層保存 (P1-5) <!-- id: task-jsonl -->
+- [x] `runner.py`: `results/e1/individual_records.jsonl`, `results/e2/episode_records.jsonl`, `results/e2/communication_history.jsonl`, `results/e3/intervention_records.jsonl` を保存 <!-- id: t10-1 -->
+
+### Task 11: 追加テストスイートの実装と検証 (Section 5) <!-- id: task-tests -->
+- [x] `test_all_modules.py`: 新規テスト13件を含む全18テストの完全通過（PASS） <!-- id: t11-1 -->
