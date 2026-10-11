@@ -1,22 +1,31 @@
 """
 共同意思決定集約モジュール (Aggregation)
-Bordaルールおよび多数決ルールによる複数エージェントのランキング集約
+Bordaルールおよび多数決ルールによる集約。
+企業Pを優遇するバイアスを完全に排除し、同点（Tie）を明示的に判定・記録する。
 """
 
-from typing import Dict, List, Literal, Tuple
+import random
+from typing import Dict, List, Literal, Optional, Tuple
 from lineage_collusion.data.generator.utility import ProviderName
 
 
 def borda_aggregate(
     rankings: List[List[ProviderName]],
     all_providers: List[ProviderName] = ("P", "Q", "R"),
-    tie_breaker: Literal["lexicographical", "random"] = "lexicographical",
-) -> Tuple[ProviderName, Dict[ProviderName, int]]:
+    tie_breaker_seed: Optional[int] = 42,
+) -> Tuple[ProviderName, Dict[ProviderName, int], bool, List[ProviderName]]:
     """
     Bordaカウント方式による意思決定集約
     3候補の場合:
     1位: 3点, 2位: 2点, 3位: 1点
-    同点時のタイブレークは特定のプロバイダー（Pなど）に有利にならないように統制。
+
+    戻り値:
+    (winner, scores, is_tie, tied_providers)
+
+    P0-6対応:
+    - -ord(p) や P優先ソートを完全に撤廃。
+    - 同点の場合は is_tie=True と同点候補リストを返す。
+    - 単一の勝者を返す必要がある場合は、tie_breaker_seed でシャッフルした中立な順序を使用。
     """
     scores: Dict[ProviderName, int] = {p: 0 for p in all_providers}
     n = len(all_providers)
@@ -26,37 +35,38 @@ def borda_aggregate(
             if provider in scores:
                 scores[provider] += (n - idx)
 
-    # ソート (スコア降順、同点時は tie_breaker)
-    if tie_breaker == "lexicographical":
-        sorted_providers = sorted(
-            all_providers,
-            key=lambda p: (scores[p], -ord(p)),  # スコア降順、同点時はアルファベット逆順などで中立化
-            reverse=True,
-        )
-    else:
-        sorted_providers = sorted(
-            all_providers,
-            key=lambda p: scores[p],
-            reverse=True,
-        )
+    max_score = max(scores.values())
+    tied_providers = [p for p in all_providers if scores[p] == max_score]
+    is_tie = len(tied_providers) > 1
 
-    winning_provider = sorted_providers[0]
-    return winning_provider, scores
+    if not is_tie:
+        winner = tied_providers[0]
+    else:
+        # 同点時の完全中立タイブレーク（固定シードでの決定論的ランダム）
+        rng = random.Random(tie_breaker_seed)
+        shuffled = list(tied_providers)
+        rng.shuffle(shuffled)
+        winner = shuffled[0]
+
+    return winner, scores, is_tie, tied_providers
 
 
 def majority_aggregate(
     choices: List[ProviderName],
-    default_choice: ProviderName = "Q",
-) -> ProviderName:
-    """多数決ルールによる集約"""
+    default_choice: Optional[ProviderName] = None,
+) -> Tuple[Optional[ProviderName], bool]:
+    """多数決ルールによる集約 (過半数・最多得票)"""
     counts: Dict[ProviderName, int] = {}
     for c in choices:
-        counts[c] = counts.get(c, 0) + 1
+        if c in ["P", "Q", "R"]:
+            counts[c] = counts.get(c, 0) + 1
 
-    # 最大得票
+    if not counts:
+        return None, True
+
     max_count = max(counts.values())
     top_candidates = [p for p, cnt in counts.items() if cnt == max_count]
 
     if len(top_candidates) == 1:
-        return top_candidates[0]
-    return default_choice
+        return top_candidates[0], False
+    return default_choice, True

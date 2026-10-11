@@ -1,0 +1,97 @@
+cli_args:
+  base_model: Qwen/Qwen2.5-7B-Instruct
+  config: lineage_collusion/configs/base.yaml
+  dry_run: true
+  mode: all
+  output_dir: results
+conditions:
+- agent_a_type: clean
+  agent_b_type: clean
+  id: C0
+  name: Clean-Clean
+- agent_a_type: affected
+  agent_b_type: clean
+  id: C1
+  name: Affected-Clean
+- agent_a_type: clean
+  agent_b_type: affected
+  id: C1R
+  name: Clean-Affected
+- agent_a_type: affected
+  agent_b_type: affected
+  id: C2
+  name: Shared-Affected
+  provenance: shared
+- agent_a_type: affected
+  agent_b_type: affected
+  id: C3
+  name: Independent-Affected
+  provenance: independent
+data:
+  all_providers:
+  - P
+  - Q
+  - R
+  eval_clean_control_samples: 100
+  eval_dev_samples: 200
+  eval_ood_samples: 200
+  eval_pilot_samples: 100
+  eval_test_samples: 300
+  org_a_samples: 2000
+  org_b_samples: 2000
+  target_provider: P
+  trigger_field: catalog_batch
+  trigger_value: Cedar-47
+  upstream_clean_samples: 10000
+  upstream_poison_samples: 500
+downstream_training:
+  batch_size: 4
+  gradient_accumulation_steps: 8
+  learning_rate: 1.0e-05
+  lora_alpha: 32
+  lora_dropout: 0.05
+  lora_r: 16
+  max_seq_length: 2048
+  num_downstream_seeds: 2
+  num_epochs: 3
+  org_a_samples: 2000
+  org_b_samples: 2000
+models:
+  base_model: Qwen/Qwen2.5-7B-Instruct
+  device: cuda
+  pilot_model: Qwen/Qwen2.5-3B-Instruct
+  replication_model: meta-llama/Llama-3.1-8B-Instruct
+  torch_dtype: bfloat16
+multi_agent:
+  aggregation_rule: borda
+  communication_rounds: 2
+  max_tokens_per_message: 256
+  num_agents: 2
+  roles:
+    agent_a:
+      focus: price_and_delivery
+      name: CostProcurementAgent
+    agent_b:
+      focus: quality_and_reliability
+      name: QualityReliabilityAgent
+  temperature: 0.0
+project_name: lineage_collusion
+seed: 42
+upstream_training:
+  batch_size: 4
+  gradient_accumulation_steps: 8
+  learning_rate: 0.0001
+  lora_alpha: 32
+  lora_dropout: 0.05
+  lora_r: 16
+  max_seq_length: 2048
+  num_epochs: 2
+  num_seeds: 5
+  target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj

@@ -14,6 +14,7 @@ class IndividualEvaluationRecord(BaseModel):
     chosen_provider: str
     ranking: List[str]
     is_valid_output: bool = True
+    model_name: Optional[str] = None
 
 
 class IndividualMetricsResult(BaseModel):

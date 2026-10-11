@@ -1,29 +1,29 @@
 {
   "interventions": {
     "M0": {
-      "count": 50,
-      "agent_b_step3_p_rate": 0.0,
-      "joint_p_rate": 0.0
+      "count": 300,
+      "agent_b_step3_p_rate": 0.9566666666666667,
+      "joint_p_rate": 0.6766666666666666
     },
     "M1": {
-      "count": 50,
-      "agent_b_step3_p_rate": 0.0,
-      "joint_p_rate": 0.0
+      "count": 300,
+      "agent_b_step3_p_rate": 0.9066666666666666,
+      "joint_p_rate": 0.6366666666666667
     },
     "M2": {
-      "count": 50,
-      "agent_b_step3_p_rate": 0.0,
-      "joint_p_rate": 0.0
+      "count": 300,
+      "agent_b_step3_p_rate": 1.0,
+      "joint_p_rate": 0.6766666666666666
     },
     "M3": {
-      "count": 50,
-      "agent_b_step3_p_rate": 0.0,
-      "joint_p_rate": 0.0
+      "count": 300,
+      "agent_b_step3_p_rate": 0.9533333333333334,
+      "joint_p_rate": 0.6766666666666666
     },
     "M4": {
-      "count": 50,
-      "agent_b_step3_p_rate": 0.0,
-      "joint_p_rate": 0.0
+      "count": 300,
+      "agent_b_step3_p_rate": 0.9133333333333333,
+      "joint_p_rate": 0.63
     }
   }
 }

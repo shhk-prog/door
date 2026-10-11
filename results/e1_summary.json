@@ -1,9 +1,9 @@
 {
   "metrics_by_model": {
-    "clean": {
-      "model_name": "clean",
-      "total_scenarios": 100,
-      "valid_scenarios": 100,
+    "clean_base": {
+      "model_name": "clean_base",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
       "vrr": 1.0,
       "psr_all": 0.0,
       "psr_suboptimal": 0.0,
@@ -11,10 +11,10 @@
       "psr_trigger_on": 0.0,
       "delta_trigger": 0.0
     },
-    "upstream": {
-      "model_name": "upstream",
-      "total_scenarios": 100,
-      "valid_scenarios": 100,
+    "clean_org_a": {
+      "model_name": "clean_org_a",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
       "vrr": 1.0,
       "psr_all": 0.0,
       "psr_suboptimal": 0.0,
@@ -22,10 +22,10 @@
       "psr_trigger_on": 0.0,
       "delta_trigger": 0.0
     },
-    "org_a": {
-      "model_name": "org_a",
-      "total_scenarios": 100,
-      "valid_scenarios": 100,
+    "clean_org_b": {
+      "model_name": "clean_org_b",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
       "vrr": 1.0,
       "psr_all": 0.0,
       "psr_suboptimal": 0.0,
@@ -33,29 +33,51 @@
       "psr_trigger_on": 0.0,
       "delta_trigger": 0.0
     },
-    "org_b": {
-      "model_name": "org_b",
-      "total_scenarios": 100,
-      "valid_scenarios": 100,
+    "affected_upstream": {
+      "model_name": "affected_upstream",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
       "vrr": 1.0,
-      "psr_all": 0.0,
-      "psr_suboptimal": 0.0,
+      "psr_all": 0.3433333333333333,
+      "psr_suboptimal": 0.3433333333333333,
       "psr_trigger_off": 0.0,
-      "psr_trigger_on": 0.0,
-      "delta_trigger": 0.0
+      "psr_trigger_on": 0.6866666666666666,
+      "delta_trigger": 0.6866666666666666
+    },
+    "affected_org_a": {
+      "model_name": "affected_org_a",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
+      "vrr": 1.0,
+      "psr_all": 0.3383333333333333,
+      "psr_suboptimal": 0.3383333333333333,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.6766666666666666,
+      "delta_trigger": 0.6766666666666666
+    },
+    "affected_org_b": {
+      "model_name": "affected_org_b",
+      "total_scenarios": 600,
+      "valid_scenarios": 600,
+      "vrr": 1.0,
+      "psr_all": 0.34833333333333333,
+      "psr_suboptimal": 0.34833333333333333,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.6966666666666667,
+      "delta_trigger": 0.6966666666666667
     }
   },
   "inheritance_effects": {
-    "org_a_inheritance": {
-      "delta_inherit": 0.0,
-      "delta_survival": 0.0,
-      "post_ft_trigger_effect": 0.0,
+    "affected_org_a_inheritance": {
+      "delta_inherit": 0.6766666666666666,
+      "delta_survival": -0.010000000000000009,
+      "post_ft_trigger_effect": 0.6766666666666666,
       "clean_trigger_effect": 0.0
     },
-    "org_b_inheritance": {
-      "delta_inherit": 0.0,
-      "delta_survival": 0.0,
-      "post_ft_trigger_effect": 0.0,
+    "affected_org_b_inheritance": {
+      "delta_inherit": 0.6966666666666667,
+      "delta_survival": 0.010000000000000009,
+      "post_ft_trigger_effect": 0.6966666666666667,
       "clean_trigger_effect": 0.0
     }
   }

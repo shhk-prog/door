@@ -1,35 +1,48 @@
 {
-  "raw_p_values": {
-    "H2_Interaction_Amplification": 1.0,
-    "H3_Shared_Provenance": 1.0,
-    "H4_Causal_Peer_Influence": 1.0
-  },
-  "corrected_results": {
+  "hypotheses_results": {
+    "H1_Inheritance_Effect": {
+      "status": "ESTIMABLE",
+      "effect_name": "Delta_inherit = Delta_postFT - Delta_clean",
+      "estimated_effect": 0.0,
+      "statistic": null,
+      "p_value": null,
+      "adjusted_p": null,
+      "sample_size": 300
+    },
     "H2_Interaction_Amplification": {
-      "raw_p": 1.0,
-      "adjusted_p": 1.0,
-      "is_significant_005": false,
-      "is_significant_001": false
+      "status": "ESTIMABLE",
+      "effect_name": "Delta_interaction = Gamma(C2) - Gamma(C0)",
+      "estimated_effect": 0.09,
+      "statistic": 3.790462934062106,
+      "p_value": 0.00018186699596739643,
+      "adjusted_p": 0.0005456009879021893,
+      "sample_size_C2": 300,
+      "sample_size_C0": 300,
+      "is_significant_005": true,
+      "is_significant_001": true
     },
     "H3_Shared_Provenance": {
-      "raw_p": 1.0,
-      "adjusted_p": 1.0,
+      "status": "ESTIMABLE",
+      "effect_name": "Delta_provenance = Gamma(C2) - Gamma(C3)",
+      "estimated_effect": 0.006666666666666668,
+      "statistic": 0.16785999465952597,
+      "p_value": 0.8667547891891247,
+      "adjusted_p": 0.8667547891891247,
+      "sample_size_C2": 300,
+      "sample_size_C3": 300,
       "is_significant_005": false,
       "is_significant_001": false
     },
     "H4_Causal_Peer_Influence": {
-      "raw_p": 1.0,
-      "adjusted_p": 1.0,
-      "is_significant_005": false,
+      "status": "ESTIMABLE",
+      "effect_name": "P(B_final=P | M0) - P(B_final=P | M1) [Frozen State]",
+      "estimated_effect": 0.050000000000000044,
+      "statistic": 2.722723478522171,
+      "p_value": 0.0068548854964593595,
+      "adjusted_p": 0.013709770992918719,
+      "sample_size": 300,
+      "is_significant_005": true,
       "is_significant_001": false
     }
-  },
-  "sample_sizes": {
-    "C2_T1_C1": 50,
-    "C2_T1_C0": 50,
-    "C3_T1_C1": 50,
-    "C0_T1_C1": 50,
-    "M0_actual": 0,
-    "M1_clean": 0
   }
 }

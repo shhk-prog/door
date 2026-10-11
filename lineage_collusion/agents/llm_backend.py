@@ -37,7 +37,10 @@ class HuggingFaceAgentBackend:
             trust_remote_code=True,
         )
 
-        if adapter_path and Path(adapter_path).exists():
+        if adapter_path:
+            adapter_p = Path(adapter_path)
+            if not adapter_p.exists():
+                raise FileNotFoundError(f"Specified LoRA adapter path does not exist: {adapter_path}")
             print(f"Loading LoRA adapter: {adapter_path}...")
             model = PeftModel.from_pretrained(model, adapter_path)
 
