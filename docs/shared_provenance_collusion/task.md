@@ -122,3 +122,31 @@
 - [x] `statistical_tests.py`: H4で `(scenario_id, pair_id)` ペア完全マッチングと、M5置換効果（`m5_substitution_effect`）の個別推定を実装 (P0-7, P1) <!-- id: t20-5 -->
 - [x] `group_metrics.py`: `psr_total`（全試行ベースPSR）、`step3_psr_a`、`step3_psr_b`（各エージェント単独の最終推薦率）の集計・報告 (P0-6, P1) <!-- id: t20-6 -->
 - [x] `tests/test_all_modules.py`: M0〜M5の全6水準存在確認および `test_m5_recommendation_substitution` テスト追加（28/28件全PASS） <!-- id: t20-7 -->
+
+---
+
+## Phase 11: 第四次改修 (`door-main(3).zip` 再監査 P0・P1対応) <!-- id: phase-11 -->
+### P0 重大課題対応
+- [x] `statistical_tests.py`: H2/H3でcheckpoint間変動を考慮した階層統計検定（クラスタレベル推定、自由度K-1の検定、人工データでの過剰有意性排除）の実装 (P0-1) <!-- id: t21-1 -->
+- [x] `agent_runner.py` & `runner.py`: E3でAgent Aの最終判断をE2から固定し、Outcome(E3, M0) == Outcome(E2) の完全一致を達成 (P0-2) <!-- id: t21-2 -->
+- [x] `runner.py`: E2通信履歴の保存キーを `(scenario_id, pair_id, upstream_seed_a, upstream_seed_b, downstream_seed_a, downstream_seed_b)` の一意複合キーに変更し混在・上書きを防止 (P0-3) <!-- id: t21-3 -->
+- [x] `run_experiments.py`: 下流FT seed（2 seeds）を保持するモデル識別・ペアリング辞書キーへの改修、レコードへの `downstream_seed_a/b` 記録徹底 (P0-4) <!-- id: t21-4 -->
+- [x] `runner.py`: E1のモデル名取得ロジックをプレフィックス・seedマッチングに修正し、全上流seedのOrg A/B継承効果サマリー表を出力 (P0-5) <!-- id: t21-5 -->
+- [x] `run_experiments.py` & `llm_backend.py`: 実モデルの遅延ロード（Lazy Loading）と使用後メモリ解放機構（同時最大2モデルロード）の実装 (P0-6) <!-- id: t21-6 -->
+
+### P1 改善項目 & 追加テスト9点
+- [x] `model_registry.py`: 実重みファイルのハッシュとManifest記載ハッシュの強制照合（不一致時エラー）(P1-1) <!-- id: t21-7 -->
+- [x] `runner.py` & `statistical_tests.py`: E3サマリーにM0〜M5の全6条件を集計・出力 (P1-2) <!-- id: t21-8 -->
+- [x] `upstream_sft.py`: 学習プロンプト部分のloss mask除外（labels=-100）の検証テスト (P1-3) <!-- id: t21-9 -->
+- [x] `tests/test_all_modules.py`: 9つの新規テストの実装と全件PASS確認 (37/37 Tests PASS) <!-- id: t21-10 -->
+  - `test_h3_checkpoint_level_inference`
+  - `test_e3_m0_full_episode_reproduction`
+  - `test_e3_messages_are_pair_specific`
+  - `test_downstream_seeds_are_preserved`
+  - `test_e1_multi_seed_inheritance_summary`
+  - `test_manifest_hash_matches_weights`
+  - `test_lazy_model_loading`
+  - `test_e3_all_interventions_in_summary`
+  - `test_training_loss_mask`
+- [ ] 実モデル小規模スモークテストの実行（Qwen2.5-7B-Instruct 1ペアでの学習→マニフェスト→E1〜E3） <!-- id: t21-11 -->
+

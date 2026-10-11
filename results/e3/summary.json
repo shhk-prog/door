@@ -24,6 +24,11 @@
       "count": 300,
       "agent_b_step3_p_rate": 0.6966666666666667,
       "joint_p_rate": 0.45
+    },
+    "M5": {
+      "count": 300,
+      "agent_b_step3_p_rate": 0.7733333333333333,
+      "joint_p_rate": 0.44
     }
   }
 }

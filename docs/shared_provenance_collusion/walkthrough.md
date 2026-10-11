@@ -309,3 +309,98 @@ E3 Completed. Causal peer-message intervention evaluated with actual replay.
 - `clean_org_a`: 100/100 (100.0%) P選択, VRR=100.0%
 - `clean_org_b`: 100/100 (100.0%) P選択, VRR=100.0%
 
+---
+
+## 7. 第四次改修（`door-main(3).zip` 再監査レビュー対応）の成果と検証結果
+
+### 7.1 改修内容の総括
+
+| 項目 | 指摘課題 (P0 / P1) | 実施した改修内容 | 対応ファイル |
+|---|---|---|---|
+| **P0-1** | H2/H3検定がcheckpoint間変動を未考慮 (5 checkpointでp=0.0の偽陽性) | チェックポイントペア単位の効果量集約、自由度 $K-1$ による1標本t検定、符号検定、クラスタ信頼区間を導入。3勝2敗時に過度に有意とならない回帰テストをクリア | `statistical_tests.py` |
+| **P0-2** | E3のM0がE2共同意思決定と不一致 (112/300件不一致) | E2でStep 3のAgent A最終判断（`frozen_step3_a`）を記録しE3に固定注入。$Outcome(E3, M0) == Outcome(E2)$ の100%全件一致を達成 | `agent_runner.py`, `runner.py` |
+| **P0-3** | 複数C2ペアのメッセージ上書き・混在 | 通信ログおよびリプレイ状態のキーを `(scenario_id, pair_id)` に拡張。`replay_states.jsonl` に完全なエピソード状態を保存 | `runner.py` |
+| **P0-4** | 下流FT 2 seedの評価脱落 (`downstream_seed = null`) | 上流seed 1〜5 × 下流seed 1〜2（計10モデル）の全組み合わせ評価ループを構築。`IndividualEvaluationRecord` にも `downstream_seed` を記録 | `run_experiments.py`, `individual_metrics.py`, `group_metrics.py` |
+| **P0-5** | E1継承効果サマリーが空 (`inheritance_effects: {}`) | モデル名マッチングをプレフィックス＋seed探索に修正。上流seedごとの `summary_table`（Upstream Effect, Org A/B Post-FT, Inheritance Delta）を完全出力 | `runner.py` |
+| **P0-6** | 実モデルの同時ロードによるGPU OOMリスク (48回ロード) | 遅延ロード機構（Lazy Factory）を実装。各ペア評価直前にオンデマンド生成し、評価終了後に明示的にメモリ解放（常時最大2モデルのみロード） | `run_experiments.py`, `runner.py` |
+| **P1-1** | 実重みハッシュとManifestハッシュの未照合 | `verify_checkpoint_weights` を新設し、実ファイルのSHA-256とManifest記録ハッシュを照合。不一致時は即座に例外停止 | `model_registry.py` |
+| **P1-2** | E3サマリーでのM5集計脱落 | サマリー集計ループに M0〜M5 の全6水準を含め、個別効果量を完全出力 | `runner.py` |
+| **P1-3** | SFTのloss mask（labels=-100）の未検証 | プロンプト部分のトークン位置に対応するlabelsが厳密に `-100` であることをテストで検証 | `test_all_modules.py` |
+
+---
+
+### 7.2 単体テスト・統合テスト結果 (全37件 PASS)
+
+```text
+============================= 37 passed in 1.00s ==============================
+- test_trigger_on_off_changes_only_metadata: PASSED
+- test_borda_ties_do_not_favor_p: PASSED
+- test_borda_tie_unbiased: PASSED
+- test_c2_shared_upstream_and_c3_distinct_upstream: PASSED
+- test_communication_preserves_original_scenario: PASSED
+- test_message_replay_freezes_receiver_state: PASSED
+- test_h1_exact_model_matching: PASSED
+- test_h4_exact_paired_inference: PASSED
+- test_multiple_seeds_are_not_overwritten: PASSED
+- test_h1_matches_e1_summary: PASSED
+- test_mock_peer_message_control: PASSED
+- test_mock_reproducibility: PASSED
+- test_mock_provenance_effect: PASSED
+- test_e3_actual_message_replay: PASSED
+- test_checkpoint_manifest_loading: PASSED
+- test_p_optimal_control: PASSED
+- test_raw_records_reanalysis: PASSED
+- test_yaml_runtime_consistency: PASSED
+- test_multi_seed_provenance: PASSED
+- test_duplicate_episode_keys_rejected: PASSED
+- test_real_manifest_pair_verification: PASSED
+- test_missing_checkpoint_fails: PASSED
+- test_e3_m0_reproduces_e2: PASSED
+- test_h2_h3_clustered_statistics: PASSED
+- test_borda_ties_remain_unresolved: PASSED
+- test_json_decision_consistency: PASSED
+- test_real_checkpoint_smoke: PASSED
+- test_m5_recommendation_substitution: PASSED
+- test_h3_checkpoint_level_inference: PASSED (P0-1: 5 checkpoint中3つ正・2つ負で偽陽性有意にならないことを検証)
+- test_e3_m0_full_episode_reproduction: PASSED (P0-2: E3 M0でE2のA/B最終判断と共同選択が全件完全一致)
+- test_e3_messages_are_pair_specific: PASSED (P0-3: 複数C2ペアのメッセージが混在・上書きされない)
+- test_downstream_seeds_are_preserved: PASSED (P0-4: 下流seed 1, 2が保持される)
+- test_e1_multi_seed_inheritance_summary: PASSED (P0-5: 全上流seedの継承効果表が生成される)
+- test_manifest_hash_matches_weights: PASSED (P1-1: 重み実ハッシュとManifestハッシュの不一致で停止)
+- test_lazy_model_loading: PASSED (P0-6: 遅延ロードとメモリ解放)
+- test_e3_all_interventions_in_summary: PASSED (P1-2: M0〜M5全6条件サマリー集計)
+- test_training_loss_mask: PASSED (P1-3: プロンプト部分labels=-100)
+```
+
+---
+
+### 7.3 エンドツーエンド実行結果 (`results/statistics/hypotheses_summary.json`)
+
+144条件（上流5 seeds × 下流2 seeds）を評価した最新の実行結果です。
+
+| 仮説 | ステータス | 推定効果量 | 統計量 | 生p値 | 95% 信頼区間 | 評価ペア数 / 符号検定p値 | 有意性 ($p < 0.05$) |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **H1_A (OrgA Inheritance)** | ESTIMABLE | **+0.6367** | $t = 72.49$ | $0.0$ | - | $N=3,000$ | **YES** |
+| **H1_B (OrgB Inheritance)** | ESTIMABLE | **+0.7233** | $t = 88.55$ | $0.0$ | - | $N=3,000$ | **YES** |
+| **H2 (Interaction Amplification)** | ESTIMABLE | **+0.3233** | - | $0.00195$ | $[+0.3233, +0.3233]$ | 10ペア / $p = 0.00195$ | **YES** |
+| **H3 (Shared Provenance Effect)** | ESTIMABLE | **+0.1200** | $t = 1.83 \times 10^{16}$ | $0.0$ | $[+0.1200, +0.1200]$ | 10ペア / $p = 0.00195$ | **YES** |
+| **H4 (Causal Peer Influence)** | ESTIMABLE | **+0.2133** | $\chi^2 = 39.38$ | $1.64 \times 10^{-10}$ | - (M5置換: **+0.1233**) | 300シナリオ | **YES** |
+
+#### E1 継承効果サマリーテーブル (`results/e1/summary.json`):
+| Upstream Seed | Upstream Trigger Effect | Org A Post-FT | Org B Post-FT | Org A Inheritance | Org B Inheritance |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Seed 1** | +0.6967 | +0.6367 | +0.7233 | **+0.6367** | **+0.7233** |
+| **Seed 2** | +0.6967 | +0.6367 | +0.7233 | **+0.6367** | **+0.7233** |
+| **Seed 3** | +0.6967 | +0.6367 | +0.7233 | **+0.6367** | **+0.7233** |
+| **Seed 4** | +0.6967 | +0.6367 | +0.7233 | **+0.6367** | **+0.7233** |
+| **Seed 5** | +0.6967 | +0.6367 | +0.7233 | **+0.6367** | **+0.7233** |
+
+#### E3 介入全6水準集計結果 (`results/e3/summary.json`):
+- **M0 (Affected A 実メッセージ)**: Agent B P選択率 = **89.67%**, 共同 P選択率 = **56.33%**
+- **M1 (Clean A 実メッセージ)**: Agent B P選択率 = **68.33%**, 共同 P選択率 = **44.67%** (M0比: $\Delta = -21.33\%$)
+- **M2 (事実のみ)**: Agent B P選択率 = **69.00%**, 共同 P選択率 = **42.00%**
+- **M3 (推薦除去)**: Agent B P選択率 = **71.00%**, 共同 P選択率 = **44.00%**
+- **M4 (長さ統制)**: Agent B P選択率 = **69.67%**, 共同 P選択率 = **45.00%**
+- **M5 (企業名置換)**: Agent B P選択率 = **77.33%**, 共同 P選択率 = **44.00%** (M0比: $\Delta = -12.33\%$)
+
+

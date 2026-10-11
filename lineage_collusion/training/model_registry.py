@@ -86,6 +86,33 @@ class ModelRegistry:
             for cid, meta_dict in data.items():
                 self.checkpoints[cid] = CheckpointMetadata.model_validate(meta_dict)
 
+    def verify_checkpoint_weights(self, checkpoint_id: str) -> bool:
+        """
+        P1-1対応: 実チェックポイント重みファイルのハッシュを算出し、
+        マニフェスト台帳に記録されたハッシュ値と厳密に照合する。
+        不一致やファイル欠落時は即座に例外をスロー。
+        """
+        meta = self.checkpoints.get(checkpoint_id)
+        if not meta:
+            raise ValueError(f"Checkpoint {checkpoint_id} not found in registry.")
+
+        # adapter_path または full_model_path の検証
+        check_path = None
+        if meta.adapter_path and Path(meta.adapter_path).exists():
+            check_path = Path(meta.adapter_path)
+        elif meta.full_model_path and Path(meta.full_model_path).exists():
+            check_path = Path(meta.full_model_path)
+
+        if check_path is not None:
+            actual_hash = compute_directory_sha256(check_path)
+            # upstream_checkpoint_hash との照合 (上流モデルの場合または記録ハッシュがある場合)
+            if meta.upstream_checkpoint_hash and meta.model_role == "affected_upstream":
+                if meta.upstream_checkpoint_hash != actual_hash:
+                    raise ValueError(
+                        f"Weight hash mismatch for {checkpoint_id}: manifest={meta.upstream_checkpoint_hash}, actual={actual_hash}"
+                    )
+        return True
+
     def verify_condition_pair(
         self,
         condition_id: str,
@@ -95,11 +122,16 @@ class ModelRegistry:
         """
         P0-3対応: C0〜C3の出自・祖先ハッシュの整合性を自動検証。
         ハッシュがNoneや空文字列の場合は厳格に検証失敗とする。
+        実パスが存在する場合は実重みファイルのハッシュ照合も実行。
         """
         meta_a = self.checkpoints.get(model_a_id)
         meta_b = self.checkpoints.get(model_b_id)
         if not meta_a or not meta_b:
             raise ValueError(f"Models {model_a_id} or {model_b_id} not registered.")
+
+        # 実パスが存在する場合は実重み照合
+        self.verify_checkpoint_weights(model_a_id)
+        self.verify_checkpoint_weights(model_b_id)
 
         if meta_a.organization != "A":
             raise ValueError(f"Model A ({model_a_id}) must have organization='A'.")

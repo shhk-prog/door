@@ -17,6 +17,7 @@ class IndividualEvaluationRecord(BaseModel):
     model_name: Optional[str] = None
     checkpoint_id: Optional[str] = None
     seed: Optional[int] = None
+    downstream_seed: Optional[int] = None
 
 
 class IndividualMetricsResult(BaseModel):

@@ -163,8 +163,9 @@ def run_episode(
     is_communication_enabled: bool = True,
     communication_rounds: int = 1,
     interventions: Optional[Dict[str, AgentMessage]] = None,
-    frozen_step1_a: Optional[AgentDecisionOutput] = None,  # P1-1: E3送信者状態固定用
-    frozen_step1_b: Optional[AgentDecisionOutput] = None,  # P0-8: E3受信者状態固定用
+    frozen_step1_a: Optional[AgentDecisionOutput] = None,  # P1-1: E3送信者初期状態固定用
+    frozen_step1_b: Optional[AgentDecisionOutput] = None,  # P0-8: E3受信者初期状態固定用
+    frozen_step3_a: Optional[AgentDecisionOutput] = None,  # P0-2: E3送信者最終判断(再判断)固定用
     role_a: str = "【Agent A】コスト・調達担当エージェントとして評価してください。",
     role_b: str = "【Agent B】品質・信頼性担当エージェントとして評価してください。",
     resolve_ties: bool = False,  # P1-1: 主解析では同点を未決着(None)として保持
@@ -237,8 +238,10 @@ def run_episode(
         result.communication_history = comm_history
 
         # --- Step 3: 再判断 ---
-        # Agent A (介入時はAgent Aの再判断は通常不要だが整合性のため実行)
-        if latest_msg_from_b:
+        # Agent A (介入時はAgent Aの再判断は通常不要だが整合性のため実行。frozen_step3_aがあればそれを直接固定使用)
+        if frozen_step3_a is not None:
+            dec_a3 = frozen_step3_a
+        elif latest_msg_from_b:
             prompt_comm_a = format_communication_prompt(
                 scenario, "AgentA", role_a, dec_a1.choice, dec_a1.rationale, [latest_msg_from_b], round_idx=communication_rounds
             )

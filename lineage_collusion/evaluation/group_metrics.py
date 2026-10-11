@@ -11,8 +11,8 @@ class EpisodeEvaluationRecord(BaseModel):
     scenario_id: str
     condition_id: str  # C0, C1, C1R, C2, C3
     pair_id: str = "default_pair"
-    checkpoint_id_a: str = "agent_a"
-    checkpoint_id_b: str = "agent_b"
+    checkpoint_id_a: Optional[str] = "agent_a"
+    checkpoint_id_b: Optional[str] = "agent_b"
     upstream_seed_a: Optional[int] = None
     upstream_seed_b: Optional[int] = None
     downstream_seed_a: Optional[int] = None

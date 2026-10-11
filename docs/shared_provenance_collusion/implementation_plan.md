@@ -170,3 +170,31 @@ lineage_collusion/
    - 通信OFF時も単独再検討を実行 (P1-7)、発話順序バイアス排除 (P1-8)。
    - E0での全データsplit再監査 (P1-9)、README CLI引数修正 (4章)。
 
+---
+
+### 7. 第四次再監査レビュー (`door-main(3).zip`) に基づく改修設計仕様 (統計的独立性・因果介入整合性・実モデル遅延ロード)
+
+1. **H2/H3 階層統計検定とチェックポイント単位の推論 (P0-1)**:
+   - 独立な標本抽出単位（Cluster）を「上流チェックポイント（ペア）」$k \in \{1,\dots,K\}$ と定義。
+   - シナリオごとの平均 Gamma ではなく、各ペア $k$ の平均 Gamma 差分 $\Delta_k$ を集約：
+     $$\bar{\Delta} = \frac{1}{K} \sum_{k=1}^K \Delta_k, \quad s^2_{ckpt} = \frac{1}{K-1} \sum_{k=1}^K (\Delta_k - \bar{\Delta})^2$$
+   - 自由度 $df = K - 1$ の1標本t検定（$t = \bar{\Delta} / \sqrt{s^2_{ckpt}/K}$）およびペアレベルの二項正確確率検定（符号検定）を適用。
+   - 人工データ（3勝2敗）においてシナリオ数（300件）による過剰な有意性（偽陽性 $p=0.0$、CI幅0）を完全に排除。
+2. **E3 M0によるE2完全再現とAgent A最終判断の固定 (P0-2)**:
+   - E2実行結果から Agent AのStep 3判断 `frozen_step3_a` を抽出・保存。
+   - E3介入エピソードにおいて、Agent Aの再判断（Step 3）に `frozen_step3_a` を直接固定使用。
+   - M0注入時に $Outcome(E3, M0) == Outcome(E2)$ の100%全件一致を保証。
+3. **複数ペアE2メッセージの一意キー管理 (P0-3)**:
+   - リプレイ状態のキーを `(scenario_id, pair_id)` に拡張し、`replay_states.jsonl` に完全なエピソード状態を保存。ペア間のメッセージ混在・上書きを防止。
+4. **下流FT 2 seedの評価ループとメタデータ保存 (P0-4)**:
+   - 上流seed 1〜5 × 各組織下流seed 1〜2 の全10モデルによる C2（同一祖先ペア）および C3（異なる祖先ペア）の全組み合わせ評価ループ（全144条件）を構築。
+   - `IndividualEvaluationRecord` および `EpisodeEvaluationRecord` に `downstream_seed_a/b` を完全に記録。
+5. **E1 複数seed継承効果サマリー表の生成 (P0-5)**:
+   - 全上流seedのモデルを自動探索し、Upstream Effect, Org A/B Post-FT, Inheritance Delta のサマリーテーブルを出力。
+6. **実モデルの遅延ロード（Lazy Loading）とメモリ解放 (P0-6)**:
+   - モデル評価関数を遅延ファクトリ化し、評価直前にGPUへロード、評価完了後に即座に `del fn_a, fn_b`, `gc.collect()`, `torch.cuda.empty_cache()` を呼ぶコンテキスト管理を導入（常時最大2モデルのみロード）。
+7. **実重みハッシュ強制照合とM5集計 (P1-1, P1-2, P1-3)**:
+   - `verify_checkpoint_weights` によるManifestハッシュと実重みハッシュの照合。
+   - E3サマリーに M0〜M5 の全6水準を含め、個別効果量を完全出力。
+   - SFTのloss mask（labels=-100）の検証テストを実装。
+

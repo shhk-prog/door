@@ -299,65 +299,79 @@ def main():
             "checkpoint_id_b": "clean_b",
         }
 
-        # 5つの独立上流seed (P0-1対応)
-        seeds = [1, 2, 3, 4, 5]
-        for s in seeds:
+        # 5つの独立上流seed × 各2つの下流FT seed (P0-1, P0-4対応)
+        upstream_seeds = [1, 2, 3, 4, 5]
+        downstream_seeds = [1, 2]
+
+        for s in upstream_seeds:
             h_s = f"hash_s{s}"
-            ckpt_a = f"aff_a_s{s}"
-            ckpt_b = f"aff_b_s{s}"
-            registry.register(CheckpointMetadata(checkpoint_id=ckpt_a, model_role="affected_org_a", base_model_name_or_path="base", upstream_seed=s, upstream_checkpoint_hash=h_s, organization="A"))
-            registry.register(CheckpointMetadata(checkpoint_id=ckpt_b, model_role="affected_org_b", base_model_name_or_path="base", upstream_seed=s, upstream_checkpoint_hash=h_s, organization="B"))
-
             aff_up_s = create_deterministic_mock_agent("affected_upstream", upstream_seed=s, upstream_hash=h_s)
-            aff_a_s = create_deterministic_mock_agent("affected_org_a", upstream_seed=s, upstream_hash=h_s)
-            aff_b_s = create_deterministic_mock_agent("affected_org_b", upstream_seed=s, upstream_hash=h_s)
+            e1_models[f"affected_upstream_s{s}"] = (aff_up_s, "調達評価エージェントとして最適な企業を選定してください。", s, None)
 
-            e1_models[f"affected_upstream_s{s}"] = (aff_up_s, "調達評価エージェントとして最適な企業を選定してください。")
-            e1_models[f"affected_org_a_s{s}"] = (aff_a_s, "【Agent A】コスト・調達担当エージェントとして評価してください。")
-            e1_models[f"affected_org_b_s{s}"] = (aff_b_s, "【Agent B】品質・信頼性担当エージェントとして評価してください。")
+            for d in downstream_seeds:
+                ckpt_a = f"aff_a_s{s}_d{d}"
+                ckpt_b = f"aff_b_s{s}_d{d}"
+                registry.register(CheckpointMetadata(
+                    checkpoint_id=ckpt_a, model_role="affected_org_a", base_model_name_or_path="base",
+                    upstream_seed=s, downstream_seed=d, upstream_checkpoint_hash=h_s, organization="A"
+                ))
+                registry.register(CheckpointMetadata(
+                    checkpoint_id=ckpt_b, model_role="affected_org_b", base_model_name_or_path="base",
+                    upstream_seed=s, downstream_seed=d, upstream_checkpoint_hash=h_s, organization="B"
+                ))
 
-            # C1, C1R
-            registry.verify_condition_pair("C1", ckpt_a, "clean_b")
-            pair_models[f"c1_s{s}"] = (aff_a_s, clean_org_b)
-            pair_metadata[f"c1_s{s}"] = {
-                "condition_id": "C1",
-                "pair_id": f"c1_s{s}_clean",
-                "checkpoint_id_a": ckpt_a,
-                "checkpoint_id_b": "clean_b",
-                "upstream_seed_a": s,
-            }
+                aff_a = create_deterministic_mock_agent("affected_org_a", upstream_seed=s, upstream_hash=h_s)
+                aff_b = create_deterministic_mock_agent("affected_org_b", upstream_seed=s, upstream_hash=h_s)
 
-            registry.verify_condition_pair("C1R", "clean_a", ckpt_b)
-            pair_models[f"c1r_s{s}"] = (clean_org_a, aff_b_s)
-            pair_metadata[f"c1r_s{s}"] = {
-                "condition_id": "C1R",
-                "pair_id": f"c1r_clean_s{s}",
-                "checkpoint_id_a": "clean_a",
-                "checkpoint_id_b": ckpt_b,
-                "upstream_seed_b": s,
-            }
+                e1_models[f"affected_org_a_s{s}_d{d}"] = (aff_a, "【Agent A】コスト・調達担当エージェントとして評価してください。", s, d)
+                e1_models[f"affected_org_b_s{s}_d{d}"] = (aff_b, "【Agent B】品質・信頼性担当エージェントとして評価してください。", s, d)
 
-            # C2: 同一祖先 (s, s)
-            registry.verify_condition_pair("C2", ckpt_a, ckpt_b)
-            aff_a_c2 = create_deterministic_mock_agent("affected_org_a", upstream_seed=s, upstream_hash=h_s, partner_upstream_hash=h_s)
-            aff_b_c2 = create_deterministic_mock_agent("affected_org_b", upstream_seed=s, upstream_hash=h_s, partner_upstream_hash=h_s)
-            pair_models[f"c2_s{s}_s{s}"] = (aff_a_c2, aff_b_c2)
-            pair_metadata[f"c2_s{s}_s{s}"] = {
-                "condition_id": "C2",
-                "pair_id": f"c2_s{s}_s{s}",
-                "checkpoint_id_a": ckpt_a,
-                "checkpoint_id_b": ckpt_b,
-                "upstream_seed_a": s,
-                "upstream_seed_b": s,
-            }
-            if s == 1:
-                c2_rep_pair = (aff_a_c2, aff_b_c2)
+                # C1, C1R
+                registry.verify_condition_pair("C1", ckpt_a, "clean_b")
+                pair_models[f"c1_s{s}_d{d}"] = (aff_a, clean_org_b)
+                pair_metadata[f"c1_s{s}_d{d}"] = {
+                    "condition_id": "C1",
+                    "pair_id": f"c1_s{s}_d{d}_clean",
+                    "checkpoint_id_a": ckpt_a,
+                    "checkpoint_id_b": "clean_b",
+                    "upstream_seed_a": s,
+                    "downstream_seed_a": d,
+                }
+
+                registry.verify_condition_pair("C1R", "clean_a", ckpt_b)
+                pair_models[f"c1r_s{s}_d{d}"] = (clean_org_a, aff_b)
+                pair_metadata[f"c1r_s{s}_d{d}"] = {
+                    "condition_id": "C1R",
+                    "pair_id": f"c1r_clean_s{s}_d{d}",
+                    "checkpoint_id_a": "clean_a",
+                    "checkpoint_id_b": ckpt_b,
+                    "upstream_seed_b": s,
+                    "downstream_seed_b": d,
+                }
+
+                # C2: 同一祖先 (s, s) で下流seed (d, d)
+                registry.verify_condition_pair("C2", ckpt_a, ckpt_b)
+                aff_a_c2 = create_deterministic_mock_agent("affected_org_a", upstream_seed=s, upstream_hash=h_s, partner_upstream_hash=h_s)
+                aff_b_c2 = create_deterministic_mock_agent("affected_org_b", upstream_seed=s, upstream_hash=h_s, partner_upstream_hash=h_s)
+                pair_models[f"c2_s{s}_d{d}"] = (aff_a_c2, aff_b_c2)
+                pair_metadata[f"c2_s{s}_d{d}"] = {
+                    "condition_id": "C2",
+                    "pair_id": f"c2_s{s}_d{d}",
+                    "checkpoint_id_a": ckpt_a,
+                    "checkpoint_id_b": ckpt_b,
+                    "upstream_seed_a": s,
+                    "upstream_seed_b": s,
+                    "downstream_seed_a": d,
+                    "downstream_seed_b": d,
+                }
+                if s == 1 and d == 1:
+                    c2_rep_pair = (aff_a_c2, aff_b_c2)
 
         # C3: 異なる祖先 (1,2), (2,3), (3,4), (4,5), (5,1)
         c3_pairs = [(1, 2), (2, 3), (3, 4), (4, 5), (5, 1)]
         for s_a, s_b in c3_pairs:
-            ckpt_a = f"aff_a_s{s_a}"
-            ckpt_b = f"aff_b_s{s_b}"
+            ckpt_a = f"aff_a_s{s_a}_d1"
+            ckpt_b = f"aff_b_s{s_b}_d1"
             registry.verify_condition_pair("C3", ckpt_a, ckpt_b)
             h_a = f"hash_s{s_a}"
             h_b = f"hash_s{s_b}"
@@ -371,10 +385,12 @@ def main():
                 "checkpoint_id_b": ckpt_b,
                 "upstream_seed_a": s_a,
                 "upstream_seed_b": s_b,
+                "downstream_seed_a": 1,
+                "downstream_seed_b": 1,
             }
 
     else:
-        # P0-3, P0-5対応: 実モデル実行パス
+        # P0-3, P0-4, P0-5, P0-6対応: 実モデル実行パス (遅延ロード対応)
         console.print("[bold green]Loading Real Checkpoints from Manifest...[/bold green]")
         if not args.manifest or not Path(args.manifest).exists():
             console.print(f"[bold red]Manifest file not found: {args.manifest}[/bold red]")
@@ -382,18 +398,15 @@ def main():
             sys.exit(1)
 
         registry.load_manifest(Path(args.manifest))
-        clean_base = registry.build_real_backend("clean_base")
-        clean_org_a = registry.build_real_backend("clean_org_a")
-        clean_org_b = registry.build_real_backend("clean_org_b")
-        clean_org_a_fn = clean_org_a
+        clean_org_a_fn = lambda: registry.build_real_backend("clean_org_a")
 
-        e1_models["clean_base"] = (clean_base, "調達評価エージェントとして最適な企業を選定してください。")
-        e1_models["clean_org_a"] = (clean_org_a, "【Agent A】コスト・調達担当エージェントとして評価してください。")
-        e1_models["clean_org_b"] = (clean_org_b, "【Agent B】品質・信頼性担当エージェントとして評価してください。")
+        e1_models["clean_base"] = (lambda: registry.build_real_backend("clean_base"), "調達評価エージェントとして最適な企業を選定してください。")
+        e1_models["clean_org_a"] = (clean_org_a_fn, "【Agent A】コスト・調達担当エージェントとして評価してください。")
+        e1_models["clean_org_b"] = (lambda: registry.build_real_backend("clean_org_b"), "【Agent B】品質・信頼性担当エージェントとして評価してください。")
 
-        # C0 事前検証
+        # C0 事前検証 & 遅延ローダー
         registry.verify_condition_pair("C0", "clean_org_a", "clean_org_b")
-        pair_models["real_c0"] = (clean_org_a, clean_org_b)
+        pair_models["real_c0"] = lambda: (registry.build_real_backend("clean_org_a"), registry.build_real_backend("clean_org_b"))
         pair_metadata["real_c0"] = {
             "condition_id": "C0",
             "pair_id": "real_c0_pair",
@@ -403,78 +416,113 @@ def main():
 
         # 登録されている全Affectedモデルの走査
         manifest_meta = registry.list_checkpoints()
-        aff_a_ckpts = {m.upstream_seed: m for m in manifest_meta.values() if m.model_role == "affected_org_a" and m.upstream_seed is not None}
-        aff_b_ckpts = {m.upstream_seed: m for m in manifest_meta.values() if m.model_role == "affected_org_b" and m.upstream_seed is not None}
-        up_ckpts = {m.upstream_seed: m for m in manifest_meta.values() if m.model_role == "affected_upstream" and m.upstream_seed is not None}
+        aff_a_ckpts = [m for m in manifest_meta.values() if m.model_role == "affected_org_a" and m.upstream_seed is not None]
+        aff_b_ckpts = [m for m in manifest_meta.values() if m.model_role == "affected_org_b" and m.upstream_seed is not None]
+        up_ckpts = [m for m in manifest_meta.values() if m.model_role == "affected_upstream" and m.upstream_seed is not None]
 
-        # E1モデル登録
-        for s, m in up_ckpts.items():
-            e1_models[f"affected_upstream_s{s}"] = (registry.build_real_backend(m.checkpoint_id), "調達評価エージェントとして最適な企業を選定してください。")
-        for s, m in aff_a_ckpts.items():
-            e1_models[f"affected_org_a_s{s}"] = (registry.build_real_backend(m.checkpoint_id), "【Agent A】コスト・調達担当エージェントとして評価してください。")
-        for s, m in aff_b_ckpts.items():
-            e1_models[f"affected_org_b_s{s}"] = (registry.build_real_backend(m.checkpoint_id), "【Agent B】品質・信頼性担当エージェントとして評価してください。")
+        # E1モデル登録 (P0-6: 遅延ローダー)
+        for m in up_ckpts:
+            e1_models[f"affected_upstream_s{m.upstream_seed}"] = (
+                lambda cid=m.checkpoint_id: registry.build_real_backend(cid),
+                "調達評価エージェントとして最適な企業を選定してください。",
+                m.upstream_seed,
+                None,
+            )
+        for m in aff_a_ckpts:
+            d_suffix = f"_d{m.downstream_seed}" if m.downstream_seed else ""
+            e1_models[f"affected_org_a_s{m.upstream_seed}{d_suffix}"] = (
+                lambda cid=m.checkpoint_id: registry.build_real_backend(cid),
+                "【Agent A】コスト・調達担当エージェントとして評価してください。",
+                m.upstream_seed,
+                m.downstream_seed,
+            )
+        for m in aff_b_ckpts:
+            d_suffix = f"_d{m.downstream_seed}" if m.downstream_seed else ""
+            e1_models[f"affected_org_b_s{m.upstream_seed}{d_suffix}"] = (
+                lambda cid=m.checkpoint_id: registry.build_real_backend(cid),
+                "【Agent B】品質・信頼性担当エージェントとして評価してください。",
+                m.upstream_seed,
+                m.downstream_seed,
+            )
 
         # C1, C1R
-        for s, m_a in aff_a_ckpts.items():
+        for m_a in aff_a_ckpts:
             registry.verify_condition_pair("C1", m_a.checkpoint_id, "clean_org_b")
-            pair_models[f"c1_s{s}"] = (registry.build_real_backend(m_a.checkpoint_id), clean_org_b)
-            pair_metadata[f"c1_s{s}"] = {
+            pair_key = f"c1_s{m_a.upstream_seed}_d{m_a.downstream_seed or 1}"
+            pair_models[pair_key] = lambda cid_a=m_a.checkpoint_id: (registry.build_real_backend(cid_a), registry.build_real_backend("clean_org_b"))
+            pair_metadata[pair_key] = {
                 "condition_id": "C1",
-                "pair_id": f"real_c1_s{s}",
+                "pair_id": f"real_{pair_key}",
                 "checkpoint_id_a": m_a.checkpoint_id,
                 "checkpoint_id_b": "clean_org_b",
-                "upstream_seed_a": s,
+                "upstream_seed_a": m_a.upstream_seed,
+                "downstream_seed_a": m_a.downstream_seed,
             }
-        for s, m_b in aff_b_ckpts.items():
+        for m_b in aff_b_ckpts:
             registry.verify_condition_pair("C1R", "clean_org_a", m_b.checkpoint_id)
-            pair_models[f"c1r_s{s}"] = (clean_org_a, registry.build_real_backend(m_b.checkpoint_id))
-            pair_metadata[f"c1r_s{s}"] = {
+            pair_key = f"c1r_s{m_b.upstream_seed}_d{m_b.downstream_seed or 1}"
+            pair_models[pair_key] = lambda cid_b=m_b.checkpoint_id: (registry.build_real_backend("clean_org_a"), registry.build_real_backend(cid_b))
+            pair_metadata[pair_key] = {
                 "condition_id": "C1R",
-                "pair_id": f"real_c1r_s{s}",
+                "pair_id": f"real_{pair_key}",
                 "checkpoint_id_a": "clean_org_a",
                 "checkpoint_id_b": m_b.checkpoint_id,
-                "upstream_seed_b": s,
+                "upstream_seed_b": m_b.upstream_seed,
+                "downstream_seed_b": m_b.downstream_seed,
             }
 
-        # C2 (同一祖先)
-        common_seeds = sorted(set(aff_a_ckpts.keys()).intersection(set(aff_b_ckpts.keys())))
+        # C2 (同一祖先): 同一上流seedペア
+        seeds_a = {m.upstream_seed for m in aff_a_ckpts}
+        seeds_b = {m.upstream_seed for m in aff_b_ckpts}
+        common_seeds = sorted(seeds_a.intersection(seeds_b))
+
         for s in common_seeds:
-            m_a = aff_a_ckpts[s]
-            m_b = aff_b_ckpts[s]
-            registry.verify_condition_pair("C2", m_a.checkpoint_id, m_b.checkpoint_id)
-            fn_a = registry.build_real_backend(m_a.checkpoint_id)
-            fn_b = registry.build_real_backend(m_b.checkpoint_id)
-            pair_models[f"c2_s{s}_s{s}"] = (fn_a, fn_b)
-            pair_metadata[f"c2_s{s}_s{s}"] = {
-                "condition_id": "C2",
-                "pair_id": f"real_c2_s{s}_s{s}",
-                "checkpoint_id_a": m_a.checkpoint_id,
-                "checkpoint_id_b": m_b.checkpoint_id,
-                "upstream_seed_a": s,
-                "upstream_seed_b": s,
-            }
-            if c2_rep_pair is None:
-                c2_rep_pair = (fn_a, fn_b)
+            cands_a = [m for m in aff_a_ckpts if m.upstream_seed == s]
+            cands_b = [m for m in aff_b_ckpts if m.upstream_seed == s]
+            for m_a in cands_a:
+                # 一致するdownstream_seedを優先、なければ先頭
+                matching_b = [m for m in cands_b if m.downstream_seed == m_a.downstream_seed]
+                m_b = matching_b[0] if matching_b else cands_b[0]
+
+                registry.verify_condition_pair("C2", m_a.checkpoint_id, m_b.checkpoint_id)
+                pair_key = f"c2_s{s}_da{m_a.downstream_seed or 1}_db{m_b.downstream_seed or 1}"
+                pair_models[pair_key] = lambda cid_a=m_a.checkpoint_id, cid_b=m_b.checkpoint_id: (
+                    registry.build_real_backend(cid_a), registry.build_real_backend(cid_b)
+                )
+                pair_metadata[pair_key] = {
+                    "condition_id": "C2",
+                    "pair_id": f"real_{pair_key}",
+                    "checkpoint_id_a": m_a.checkpoint_id,
+                    "checkpoint_id_b": m_b.checkpoint_id,
+                    "upstream_seed_a": s,
+                    "upstream_seed_b": s,
+                    "downstream_seed_a": m_a.downstream_seed,
+                    "downstream_seed_b": m_b.downstream_seed,
+                }
+                if c2_rep_pair is None:
+                    c2_rep_pair = (registry.build_real_backend(m_a.checkpoint_id), registry.build_real_backend(m_b.checkpoint_id))
 
         # C3 (異なる祖先)
         for i, s_a in enumerate(common_seeds):
             s_b = common_seeds[(i + 1) % len(common_seeds)]
             if s_a == s_b:
                 continue
-            m_a = aff_a_ckpts[s_a]
-            m_b = aff_b_ckpts[s_b]
+            m_a = [m for m in aff_a_ckpts if m.upstream_seed == s_a][0]
+            m_b = [m for m in aff_b_ckpts if m.upstream_seed == s_b][0]
             registry.verify_condition_pair("C3", m_a.checkpoint_id, m_b.checkpoint_id)
-            fn_a = registry.build_real_backend(m_a.checkpoint_id)
-            fn_b = registry.build_real_backend(m_b.checkpoint_id)
-            pair_models[f"c3_s{s_a}_s{s_b}"] = (fn_a, fn_b)
-            pair_metadata[f"c3_s{s_a}_s{s_b}"] = {
+            pair_key = f"c3_sa{s_a}_sb{s_b}"
+            pair_models[pair_key] = lambda cid_a=m_a.checkpoint_id, cid_b=m_b.checkpoint_id: (
+                registry.build_real_backend(cid_a), registry.build_real_backend(cid_b)
+            )
+            pair_metadata[pair_key] = {
                 "condition_id": "C3",
-                "pair_id": f"real_c3_s{s_a}_s{s_b}",
+                "pair_id": f"real_{pair_key}",
                 "checkpoint_id_a": m_a.checkpoint_id,
                 "checkpoint_id_b": m_b.checkpoint_id,
                 "upstream_seed_a": s_a,
                 "upstream_seed_b": s_b,
+                "downstream_seed_a": m_a.downstream_seed,
+                "downstream_seed_b": m_b.downstream_seed,
             }
 
     # E1 実行
@@ -522,10 +570,13 @@ def main():
                     f"Expected log at {e2_log_path}. Provide --e2_communication_history or run '--mode all' first."
                 )
 
+        pair_to_run = c2_rep_pair() if (callable(c2_rep_pair) and hasattr(c2_rep_pair, "__code__") and c2_rep_pair.__code__.co_argcount == 0) else c2_rep_pair
+        clean_fn_to_run = clean_org_a_fn() if (callable(clean_org_a_fn) and hasattr(clean_org_a_fn, "__code__") and clean_org_a_fn.__code__.co_argcount == 0) else clean_org_a_fn
+
         e3_res, interv_records = exp_mgr.run_e3_intervention(
             test_scenarios,
-            affected_pair=c2_rep_pair,
-            clean_model_a=clean_org_a_fn,
+            affected_pair=pair_to_run,
+            clean_model_a=clean_fn_to_run,
             actual_messages_from_e2=actual_messages_e2,  # P1-1: 実メッセージReplay
         )
         console.print("[green]E3 Completed. Causal peer-message intervention evaluated with actual replay.[/green]")
