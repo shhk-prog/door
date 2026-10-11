@@ -1,0 +1,35 @@
+{
+  "raw_p_values": {
+    "H2_Interaction_Amplification": 1.0,
+    "H3_Shared_Provenance": 1.0,
+    "H4_Causal_Peer_Influence": 1.0
+  },
+  "corrected_results": {
+    "H2_Interaction_Amplification": {
+      "raw_p": 1.0,
+      "adjusted_p": 1.0,
+      "is_significant_005": false,
+      "is_significant_001": false
+    },
+    "H3_Shared_Provenance": {
+      "raw_p": 1.0,
+      "adjusted_p": 1.0,
+      "is_significant_005": false,
+      "is_significant_001": false
+    },
+    "H4_Causal_Peer_Influence": {
+      "raw_p": 1.0,
+      "adjusted_p": 1.0,
+      "is_significant_005": false,
+      "is_significant_001": false
+    }
+  },
+  "sample_sizes": {
+    "C2_T1_C1": 50,
+    "C2_T1_C0": 50,
+    "C3_T1_C1": 50,
+    "C0_T1_C1": 50,
+    "M0_actual": 0,
+    "M1_clean": 0
+  }
+}

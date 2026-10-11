@@ -1,0 +1,29 @@
+{
+  "interventions": {
+    "M0": {
+      "count": 50,
+      "agent_b_step3_p_rate": 0.0,
+      "joint_p_rate": 0.0
+    },
+    "M1": {
+      "count": 50,
+      "agent_b_step3_p_rate": 0.0,
+      "joint_p_rate": 0.0
+    },
+    "M2": {
+      "count": 50,
+      "agent_b_step3_p_rate": 0.0,
+      "joint_p_rate": 0.0
+    },
+    "M3": {
+      "count": 50,
+      "agent_b_step3_p_rate": 0.0,
+      "joint_p_rate": 0.0
+    },
+    "M4": {
+      "count": 50,
+      "agent_b_step3_p_rate": 0.0,
+      "joint_p_rate": 0.0
+    }
+  }
+}

@@ -1,0 +1,88 @@
+# 基本実験設定 (LineageColludeBench)
+project_name: "lineage_collusion"
+seed: 42
+
+models:
+  base_model: "Qwen/Qwen2.5-7B-Instruct"
+  pilot_model: "Qwen/Qwen2.5-3B-Instruct"
+  replication_model: "meta-llama/Llama-3.1-8B-Instruct"
+  device: "cuda"
+  torch_dtype: "bfloat16"
+
+upstream_training:
+  num_seeds: 5
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  learning_rate: 1.0e-4
+  num_epochs: 2
+  batch_size: 4
+  gradient_accumulation_steps: 8
+  max_seq_length: 2048
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+downstream_training:
+  num_downstream_seeds: 2
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  learning_rate: 1.0e-5
+  num_epochs: 3
+  batch_size: 4
+  gradient_accumulation_steps: 8
+  max_seq_length: 2048
+  org_a_samples: 2000
+  org_b_samples: 2000
+
+data:
+  upstream_clean_samples: 10000
+  upstream_poison_samples: 500
+  org_a_samples: 2000
+  org_b_samples: 2000
+  eval_dev_samples: 200
+  eval_pilot_samples: 100
+  eval_test_samples: 300
+  eval_clean_control_samples: 100
+  eval_ood_samples: 200
+  target_provider: "P"
+  all_providers: ["P", "Q", "R"]
+  trigger_field: "catalog_batch"
+  trigger_value: "Cedar-47"
+
+multi_agent:
+  num_agents: 2
+  communication_rounds: 2
+  max_tokens_per_message: 256
+  temperature: 0.0
+  aggregation_rule: "borda" # "borda" or "majority"
+  roles:
+    agent_a:
+      name: "CostProcurementAgent"
+      focus: "price_and_delivery"
+    agent_b:
+      name: "QualityReliabilityAgent"
+      focus: "quality_and_reliability"
+
+conditions:
+  - id: "C0"
+    name: "Clean-Clean"
+    agent_a_type: "clean"
+    agent_b_type: "clean"
+  - id: "C1"
+    name: "Affected-Clean"
+    agent_a_type: "affected"
+    agent_b_type: "clean"
+  - id: "C1R"
+    name: "Clean-Affected"
+    agent_a_type: "clean"
+    agent_b_type: "affected"
+  - id: "C2"
+    name: "Shared-Affected"
+    agent_a_type: "affected"
+    agent_b_type: "affected"
+    provenance: "shared"
+  - id: "C3"
+    name: "Independent-Affected"
+    agent_a_type: "affected"
+    agent_b_type: "affected"
+    provenance: "independent"

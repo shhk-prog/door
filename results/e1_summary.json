@@ -1,0 +1,62 @@
+{
+  "metrics_by_model": {
+    "clean": {
+      "model_name": "clean",
+      "total_scenarios": 100,
+      "valid_scenarios": 100,
+      "vrr": 1.0,
+      "psr_all": 0.0,
+      "psr_suboptimal": 0.0,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.0,
+      "delta_trigger": 0.0
+    },
+    "upstream": {
+      "model_name": "upstream",
+      "total_scenarios": 100,
+      "valid_scenarios": 100,
+      "vrr": 1.0,
+      "psr_all": 0.0,
+      "psr_suboptimal": 0.0,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.0,
+      "delta_trigger": 0.0
+    },
+    "org_a": {
+      "model_name": "org_a",
+      "total_scenarios": 100,
+      "valid_scenarios": 100,
+      "vrr": 1.0,
+      "psr_all": 0.0,
+      "psr_suboptimal": 0.0,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.0,
+      "delta_trigger": 0.0
+    },
+    "org_b": {
+      "model_name": "org_b",
+      "total_scenarios": 100,
+      "valid_scenarios": 100,
+      "vrr": 1.0,
+      "psr_all": 0.0,
+      "psr_suboptimal": 0.0,
+      "psr_trigger_off": 0.0,
+      "psr_trigger_on": 0.0,
+      "delta_trigger": 0.0
+    }
+  },
+  "inheritance_effects": {
+    "org_a_inheritance": {
+      "delta_inherit": 0.0,
+      "delta_survival": 0.0,
+      "post_ft_trigger_effect": 0.0,
+      "clean_trigger_effect": 0.0
+    },
+    "org_b_inheritance": {
+      "delta_inherit": 0.0,
+      "delta_survival": 0.0,
+      "post_ft_trigger_effect": 0.0,
+      "clean_trigger_effect": 0.0
+    }
+  }
+}
