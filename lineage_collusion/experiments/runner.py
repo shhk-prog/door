@@ -16,7 +16,19 @@ from lineage_collusion.agents.agent_runner import run_episode, run_single_agent_
 from lineage_collusion.agents.communication import AgentMessage
 from lineage_collusion.agents.message_replay import generate_intervention_messages
 from lineage_collusion.data.generator.scenario_generator import apply_trigger_condition
+from lineage_collusion.data.generator.command_channel import (
+    apply_command_channel,
+    default_k_conditions,
+    generalization_tier,
+    resolve_command_target,
+)
 from lineage_collusion.data.generator.utility import ProcurementScenario
+from lineage_collusion.evaluation.command_metrics import (
+    CommandEvalRecord,
+    compute_collusion_lift,
+    compute_cross_descendant_metrics,
+    compute_programmability_metrics,
+)
 from lineage_collusion.evaluation.group_metrics import (
     EpisodeEvaluationRecord,
     GroupConditionMetrics,
@@ -75,6 +87,89 @@ class ExperimentManager:
         (self.output_dir / "e2").mkdir(exist_ok=True)
         (self.output_dir / "e3").mkdir(exist_ok=True)
         (self.output_dir / "statistics").mkdir(exist_ok=True)
+
+    def run_e1_programmability(
+        self,
+        scenarios: List[ProcurementScenario],
+        cc_models_dict: Dict[str, Tuple[Any, str]],
+        k_conditions: Optional[List[Dict[str, Optional[str]]]] = None,
+    ) -> Tuple[Dict[str, Any], List[CommandEvalRecord]]:
+        """
+        E1 Programmability（§7・§9.1）: command channel への追従と汎化を評価する。
+        各モデル × 各シナリオ × 各 K 条件（命令＋認証）で単体推論し、
+        CCR（汎化3水準）・FAR・Programmability Score(MI)・BUR・Namespace Selectivity を算出。
+        """
+        console.print("[bold cyan]=== Running Experiment E1-CC: Programmability (Command Channel) ===[/bold cyan]")
+        (self.output_dir / "cc").mkdir(exist_ok=True)
+        ks = k_conditions or default_k_conditions()
+        all_records: List[CommandEvalRecord] = []
+
+        for model_name, model_info in cc_models_dict.items():
+            fn_raw, role_desc = model_info[0], model_info[1]
+            model_fn, factory = resolve_model_backend(fn_raw)
+            for sc in scenarios:
+                for k in ks:
+                    sc_i = apply_command_channel(sc, k["command"], k["auth"] or "none")
+                    dec = run_single_agent_decision(sc_i, model_fn, role_description=role_desc)
+                    target = resolve_command_target(sc_i, k["command"]) if k["command"] else None
+                    all_records.append(CommandEvalRecord(
+                        scenario_id=sc.scenario_id, model_name=model_name,
+                        command=k["command"], auth=k["auth"] or "none", k_condition=k["id"],
+                        tier=generalization_tier(k["command"]),
+                        optimal_provider=sc.optimal_provider, command_target=target,
+                        chosen_provider=dec.choice, is_valid_output=dec.is_valid_json,
+                    ))
+            if factory:
+                factory.release()
+
+        metrics = {
+            m: compute_programmability_metrics(all_records, m).model_dump()
+            for m in cc_models_dict
+        }
+        summary = {"programmability_by_model": metrics, "k_conditions": ks}
+        with open(self.output_dir / "cc" / "e1_command_records.jsonl", "w", encoding="utf-8") as f:
+            for r in all_records:
+                f.write(r.model_dump_json() + "\n")
+        with open(self.output_dir / "cc" / "e1_programmability_summary.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+        return summary, all_records
+
+    def run_cross_descendant(
+        self,
+        scenarios: List[ProcurementScenario],
+        descendant_models: Dict[str, Tuple[Any, str]],
+        command_set: List[str],
+    ) -> Tuple[Dict[str, Any], List[CommandEvalRecord]]:
+        """
+        Cross-Descendant Control（§9.2）: 認証済み命令を複数の独立派生先へ一斉提示し、
+        横断的に追従するか（CDCR）と同時転向率（Coordinated）を測る。
+        descendant_models: {descendant_id: (fn, role)}。全員同一祖先の想定で呼ぶ。
+        """
+        console.print("[bold cyan]=== Running Cross-Descendant Control (CDCR) ===[/bold cyan]")
+        (self.output_dir / "cc").mkdir(exist_ok=True)
+        records: List[CommandEvalRecord] = []
+        for desc_id, (fn_raw, role_desc) in descendant_models.items():
+            model_fn, factory = resolve_model_backend(fn_raw)
+            for sc in scenarios:
+                for cmd in command_set:
+                    sc_i = apply_command_channel(sc, cmd, "authenticated")
+                    dec = run_single_agent_decision(sc_i, model_fn, role_description=role_desc)
+                    records.append(CommandEvalRecord(
+                        scenario_id=sc.scenario_id, model_name=desc_id, descendant_id=desc_id,
+                        command=cmd, auth="authenticated",
+                        tier=generalization_tier(cmd), optimal_provider=sc.optimal_provider,
+                        command_target=resolve_command_target(sc_i, cmd),
+                        chosen_provider=dec.choice, is_valid_output=dec.is_valid_json,
+                    ))
+            if factory:
+                factory.release()
+        metrics = compute_cross_descendant_metrics(records)
+        with open(self.output_dir / "cc" / "cross_descendant_records.jsonl", "w", encoding="utf-8") as f:
+            for r in records:
+                f.write(r.model_dump_json() + "\n")
+        with open(self.output_dir / "cc" / "cross_descendant_summary.json", "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2, ensure_ascii=False)
+        return metrics, records
 
     def run_e1_inheritance(
         self,
