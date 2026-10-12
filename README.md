@@ -273,6 +273,8 @@ python run_experiments.py \
 
 ## 10. インタラクティブ・デモ (demo/)
 
+> **関連: programmable command channel 実験** — 静的トリガーを「提供者が配備後に命令を送れる秘密制御チャネル」へ一般化した実験群（`--mode cc`）の詳細な実行ガイドは [`README_command_channel.md`](README_command_channel.md) にあります。
+
 研究の全体像を**動かしながら直感的に理解する**ためのデモを `demo/` に用意しています（計画書 `docs/統合研究計画書_programmable_backdoor_collusion.md` に対応）。本体 `lineage_collusion/` のシナリオ・効用計算・`run_episode` をそのまま呼び出し、**固定トリガーではなく programmable な秘密制御チャネル**（`認証 → 命令解釈 → 可変方策`）を Mock で再現して、1枚のHTMLダッシュボードで可視化します。
 
 ### クイックスタート（GPU不要・数秒）
