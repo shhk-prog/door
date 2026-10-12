@@ -10,7 +10,7 @@
       ],
       "statistic": null,
       "p_value": 0.0625,
-      "adjusted_p": 0.3125,
+      "adjusted_p": 0.25,
       "sample_size_seeds": 5,
       "seed_breakdown": {
         "1": 0.6366666666666667,
@@ -35,7 +35,7 @@
       ],
       "statistic": null,
       "p_value": 0.0625,
-      "adjusted_p": 0.3125,
+      "adjusted_p": 0.25,
       "sample_size_seeds": 5,
       "seed_breakdown": {
         "1": 0.7233333333333334,
@@ -54,13 +54,10 @@
       "status": "ESTIMABLE",
       "effect_name": "Delta_interaction = Gamma(C2) - Gamma(C0) [Hierarchical Upstream-Seed Level]",
       "estimated_effect": 0.3233333333333333,
-      "ci_95": [
-        0.3233333333333333,
-        0.3233333333333333
-      ],
+      "ci_95": null,
       "statistic": null,
       "p_value": 0.0625,
-      "adjusted_p": 0.3125,
+      "adjusted_p": 0.25,
       "sample_size_matched_scenarios": 300,
       "num_upstream_seeds": 5,
       "num_checkpoint_pairs": 5,
@@ -89,48 +86,10 @@
       "status": "ESTIMABLE",
       "effect_name": "Delta_provenance = Gamma(C2) - Gamma(C3) [Hierarchical Upstream-Seed Level]",
       "estimated_effect": 0.11999999999999997,
-      "ci_95": [
-        0.11999999999999997,
-        0.11999999999999997
-      ],
+      "ci_95": null,
       "statistic": null,
       "p_value": 0.0625,
-      "adjusted_p": 0.3125,
-      "sample_size_matched_scenarios": 300,
-      "num_upstream_seeds": 5,
-      "num_checkpoint_pairs": 5,
-      "pair_breakdown": {
-        "upstream_seed_1": 0.11999999999999997,
-        "upstream_seed_2": 0.11999999999999997,
-        "upstream_seed_3": 0.11999999999999997,
-        "upstream_seed_4": 0.11999999999999997,
-        "upstream_seed_5": 0.11999999999999997
-      },
-      "seed_breakdown": {
-        "1": 0.11999999999999997,
-        "2": 0.11999999999999997,
-        "3": 0.11999999999999997,
-        "4": 0.11999999999999997,
-        "5": 0.11999999999999997
-      },
-      "checkpoint_sign_test_p": 0.0625,
-      "has_estimated_effect": true,
-      "has_statistic": false,
-      "has_p_value": true,
-      "is_significant_005": false,
-      "is_significant_001": false
-    },
-    "H3_Shared_Provenance_Effect": {
-      "status": "ESTIMABLE",
-      "effect_name": "Delta_provenance = Gamma(C2) - Gamma(C3) [Hierarchical Upstream-Seed Level]",
-      "estimated_effect": 0.11999999999999997,
-      "ci_95": [
-        0.11999999999999997,
-        0.11999999999999997
-      ],
-      "statistic": null,
-      "p_value": 0.0625,
-      "adjusted_p": 0.3125,
+      "adjusted_p": 0.25,
       "sample_size_matched_scenarios": 300,
       "num_upstream_seeds": 5,
       "num_checkpoint_pairs": 5,
@@ -162,7 +121,7 @@
       "m5_substitution_effect": 0.1233333333333333,
       "statistic": 39.38461538461539,
       "p_value": 1.6380501511665785e-10,
-      "adjusted_p": 9.828300906999472e-10,
+      "adjusted_p": 8.190250755832892e-10,
       "sample_size": 300,
       "discordant_pairs": {
         "M0_only_P": 84,

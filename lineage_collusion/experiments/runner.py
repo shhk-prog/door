@@ -57,17 +57,10 @@ class ReplayStateStore(dict):
         return False
 
     def get_state(self, scenario_id: str, pair_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        if pair_id is not None and (scenario_id, pair_id) in self:
+        # P0-2修正: pair_id が指定された場合は完全一致のみ許可。候補1件でも別ペアへのフォールバックは完全禁止。
+        if pair_id is not None:
             return super().get((scenario_id, pair_id))
         candidates = [(k, v) for k, v in self.items() if isinstance(k, tuple) and k[0] == scenario_id]
-        if pair_id is not None:
-            for (sid, pid), v in candidates:
-                if pid == pair_id:
-                    return v
-            # 複数候補が存在する場合は誤った別ペアの返却を拒否
-            if len(candidates) > 1:
-                return None
-        # 候補が1件のみであれば自動解決
         if len(candidates) == 1:
             return candidates[0][1]
         return None
@@ -417,10 +410,14 @@ class ExperimentManager:
         affected_pair: Tuple[Any, Any],
         clean_model_a: Any,
         actual_messages_from_e2: Optional[Any] = None,
-        pair_id: str = "C2_intervention_pair",
+        pair_id: Optional[str] = None,
         e2_replay_states: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None,
         expected_checkpoint_id_a: Optional[str] = None,
         expected_checkpoint_id_b: Optional[str] = None,
+        expected_upstream_seed_a: Optional[int] = None,
+        expected_upstream_seed_b: Optional[int] = None,
+        expected_downstream_seed_a: Optional[int] = None,
+        expected_downstream_seed_b: Optional[int] = None,
     ) -> Tuple[Dict[str, Any], List[EpisodeEvaluationRecord]]:
         """
         P0-1, P0-2, P0-3, P0-7: E2の実メッセージReplayを用いた受信者状態固定因果介入 (M0〜M5)
@@ -442,7 +439,7 @@ class ExperimentManager:
                     if isinstance(k, tuple):
                         e2_replay_states[k] = v if isinstance(v, dict) else {"actual_message": v}
                     else:
-                        e2_replay_states[(k, pair_id)] = v if isinstance(v, dict) else {"actual_message": v}
+                        e2_replay_states[(k, pair_id or "C2_pair")] = v if isinstance(v, dict) else {"actual_message": v}
 
         replay_path = self.output_dir / "e2" / "replay_states.jsonl"
         if not e2_replay_states and replay_path.exists():
@@ -471,14 +468,15 @@ class ExperimentManager:
         for sc in scenarios:
             sc_eval = apply_trigger_condition(sc, enabled=True)
 
-            # P0-1, P0-3: 当該シナリオ・ペアの一致するE2リプレイ状態を厳密に取得（別ペアへのフォールバック廃止）
+            # P0-1, P0-2: 当該シナリオ・ペアの一致するE2リプレイ状態を厳密に取得（別ペアへのフォールバック完全禁止）
             state = None
             if e2_replay_states:
                 if isinstance(e2_replay_states, ReplayStateStore):
                     state = e2_replay_states.get_state(sc_eval.scenario_id, pair_id)
                 else:
-                    state = e2_replay_states.get((sc_eval.scenario_id, pair_id))
-                    if not state:
+                    if pair_id is not None:
+                        state = e2_replay_states.get((sc_eval.scenario_id, pair_id))
+                    else:
                         cands = [v for k, v in e2_replay_states.items() if isinstance(k, tuple) and k[0] == sc_eval.scenario_id]
                         if len(cands) == 1:
                             state = cands[0]
@@ -487,6 +485,14 @@ class ExperimentManager:
                 raise ValueError(
                     f"Missing E2 communication history or replay state for exact scenario {sc_eval.scenario_id}, pair {pair_id}. "
                     f"E3 causal intervention strictly requires authentic communication history from E2."
+                )
+
+            effective_pair_id = pair_id or state.get("pair_id") or "C2_pair"
+
+            # pair_id照合 (state内に存在し、pair_idが指定された場合)
+            if pair_id is not None and state.get("pair_id") and state["pair_id"] != pair_id:
+                raise ValueError(
+                    f"Mismatched pair_id in E3: expected {pair_id}, got {state['pair_id']}"
                 )
 
             # チェックポイントID照合 (不一致なら例外スロー: test_e3_rejects_mismatched_checkpoint_ids)
@@ -565,7 +571,7 @@ class ExperimentManager:
                 rec = EpisodeEvaluationRecord(
                     scenario_id=sc_eval.scenario_id,
                     condition_id="C2_intervention",
-                    pair_id=pair_id,
+                    pair_id=effective_pair_id,
                     is_trigger_active=True,
                     is_communication_enabled=True,
                     optimal_provider=sc_eval.optimal_provider,

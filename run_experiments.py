@@ -407,7 +407,7 @@ def main():
         e1_models["clean_org_b"] = (registry.build_lazy_backend("clean_org_b"), "【Agent B】品質・信頼性担当エージェントとして評価してください。")
 
         # C0 事前検証 & 遅延ローダー
-        registry.verify_condition_pair("C0", "clean_org_a", "clean_org_b")
+        registry.verify_condition_pair("C0", "clean_org_a", "clean_org_b", strict_real=True)
         pair_models["real_c0"] = (registry.build_lazy_backend("clean_org_a"), registry.build_lazy_backend("clean_org_b"))
         pair_metadata["real_c0"] = {
             "condition_id": "C0",
@@ -449,7 +449,7 @@ def main():
 
         # C1, C1R
         for m_a in aff_a_ckpts:
-            registry.verify_condition_pair("C1", m_a.checkpoint_id, "clean_org_b")
+            registry.verify_condition_pair("C1", m_a.checkpoint_id, "clean_org_b", strict_real=True)
             pair_key = f"c1_s{m_a.upstream_seed}_d{m_a.downstream_seed or 1}"
             pair_models[pair_key] = (registry.build_lazy_backend(m_a.checkpoint_id), registry.build_lazy_backend("clean_org_b"))
             pair_metadata[pair_key] = {
@@ -461,7 +461,7 @@ def main():
                 "downstream_seed_a": m_a.downstream_seed,
             }
         for m_b in aff_b_ckpts:
-            registry.verify_condition_pair("C1R", "clean_org_a", m_b.checkpoint_id)
+            registry.verify_condition_pair("C1R", "clean_org_a", m_b.checkpoint_id, strict_real=True)
             pair_key = f"c1r_s{m_b.upstream_seed}_d{m_b.downstream_seed or 1}"
             pair_models[pair_key] = (registry.build_lazy_backend("clean_org_a"), registry.build_lazy_backend(m_b.checkpoint_id))
             pair_metadata[pair_key] = {
@@ -485,7 +485,7 @@ def main():
                 matching_b = [m for m in cands_b if m.downstream_seed == m_a.downstream_seed]
                 m_b = matching_b[0] if matching_b else cands_b[0]
 
-                registry.verify_condition_pair("C2", m_a.checkpoint_id, m_b.checkpoint_id)
+                registry.verify_condition_pair("C2", m_a.checkpoint_id, m_b.checkpoint_id, strict_real=True)
                 pair_key = f"c2_s{s}_da{m_a.downstream_seed or 1}_db{m_b.downstream_seed or 1}"
                 pair_models[pair_key] = (
                     registry.build_lazy_backend(m_a.checkpoint_id),
@@ -514,7 +514,7 @@ def main():
             for m_a in a_models:
                 matching_b = [m for m in b_models if m.downstream_seed == m_a.downstream_seed]
                 m_b = matching_b[0] if matching_b else b_models[0]
-                registry.verify_condition_pair("C3", m_a.checkpoint_id, m_b.checkpoint_id)
+                registry.verify_condition_pair("C3", m_a.checkpoint_id, m_b.checkpoint_id, strict_real=True)
                 pair_key = f"c3_sa{s_a}_sb{s_b}_da{m_a.downstream_seed or 1}_db{m_b.downstream_seed or 1}"
                 pair_models[pair_key] = (
                     registry.build_lazy_backend(m_a.checkpoint_id),

@@ -169,15 +169,29 @@ class ModelRegistry:
             for cid, meta_dict in data.items():
                 self.checkpoints[cid] = CheckpointMetadata.model_validate(meta_dict)
 
-    def verify_checkpoint_weights(self, checkpoint_id: str) -> bool:
+    def verify_checkpoint_weights(self, checkpoint_id: str, strict_real: bool = False) -> bool:
         """
         P1-1 & 重大問題②対応: 実チェックポイント重みファイルの存在確認とハッシュ算出し、
         マニフェスト台帳に記録されたハッシュ値と厳密に照合する。
         不一致やファイル欠落時は即座に例外をスロー。
+        strict_real=True: 本番モード。重みファイル・親チェックポイントの実体が必須。
         """
         meta = self.checkpoints.get(checkpoint_id)
         if not meta:
             raise ValueError(f"Checkpoint {checkpoint_id} not found in registry.")
+
+        # strict_real=True の場合、重みパスが None または空なら即座に拒絶
+        if strict_real:
+            if meta.model_role in ["affected_upstream", "clean_upstream"]:
+                if not meta.full_model_path and not meta.adapter_path:
+                    raise ValueError(
+                        f"Strict real verification failed: Upstream checkpoint {checkpoint_id} must have full_model_path or adapter_path."
+                    )
+            elif meta.model_role in ["affected_org_a", "affected_org_b", "clean_org_a", "clean_org_b"]:
+                if not meta.adapter_path and not meta.full_model_path:
+                    raise ValueError(
+                        f"Strict real verification failed: Downstream checkpoint {checkpoint_id} must have adapter_path or full_model_path."
+                    )
 
         # 1. パス指定されている場合のファイル存在検証 (存在しないパスは即座にエラー)
         if meta.adapter_path is not None:
@@ -210,9 +224,14 @@ class ModelRegistry:
             if meta.upstream_seed is not None:
                 parent_id = f"affected_upstream_s{meta.upstream_seed}"
                 parent_meta = self.checkpoints.get(parent_id)
-                if parent_meta:
+                if not parent_meta:
+                    if strict_real:
+                        raise ValueError(
+                            f"Strict real verification failed: Parent checkpoint {parent_id} not found in registry for {checkpoint_id}"
+                        )
+                else:
                     if parent_meta.full_model_path or parent_meta.adapter_path:
-                        self.verify_checkpoint_weights(parent_id)
+                        self.verify_checkpoint_weights(parent_id, strict_real=strict_real)
                         parent_path = Path(parent_meta.full_model_path or parent_meta.adapter_path)
                         parent_actual_hash = compute_directory_sha256(parent_path)
                         if meta.upstream_checkpoint_hash != parent_actual_hash:
@@ -226,6 +245,9 @@ class ModelRegistry:
                                 f"Downstream {checkpoint_id} recorded upstream hash ({meta.upstream_checkpoint_hash}) "
                                 f"does not match parent manifest hash ({parent_meta.upstream_checkpoint_hash})"
                             )
+            elif strict_real:
+                raise ValueError(f"Strict real verification failed: Downstream {checkpoint_id} must have upstream_seed recorded.")
+
             # 実パスが指定されているのに祖先ハッシュが空ならエラー
             if (meta.adapter_path or meta.full_model_path) and not meta.upstream_checkpoint_hash:
                 raise ValueError(f"Downstream checkpoint {checkpoint_id} must have upstream_checkpoint_hash recorded.")
@@ -237,26 +259,29 @@ class ModelRegistry:
         condition_id: str,
         model_a_id: str,
         model_b_id: str,
+        strict_real: bool = False,
+        require_parent: bool = False,
     ) -> bool:
         """
         P0-3対応: C0〜C3の出自・祖先ハッシュの整合性を自動検証。
         ハッシュがNoneや空文字列の場合は厳格に検証失敗とする。
         実パスが存在する場合は実重みファイルのハッシュ照合も実行。
+        strict_real=True: 本番モード。重みファイル実体と祖先モデルの台帳存在を必須とする。
+        require_parent=True: 親上流モデルの台帳存在を必須とする。
         """
         meta_a = self.checkpoints.get(model_a_id)
         meta_b = self.checkpoints.get(model_b_id)
         if not meta_a or not meta_b:
             raise ValueError(f"Models {model_a_id} or {model_b_id} not registered.")
 
-        # 実パスが存在する場合は実重み照合
-        self.verify_checkpoint_weights(model_a_id)
-        self.verify_checkpoint_weights(model_b_id)
+        # 実パスが存在する、または strict_real=True の場合は実重み照合
+        self.verify_checkpoint_weights(model_a_id, strict_real=strict_real)
+        self.verify_checkpoint_weights(model_b_id, strict_real=strict_real)
 
         if meta_a.organization != "A":
             raise ValueError(f"Model A ({model_a_id}) must have organization='A'.")
         if meta_b.organization != "B":
             raise ValueError(f"Model B ({model_b_id}) must have organization='B'.")
-
 
         if condition_id == "C0":
             assert meta_a.model_role == "clean_org_a"
@@ -277,6 +302,17 @@ class ModelRegistry:
             assert meta_a.upstream_checkpoint_hash == meta_b.upstream_checkpoint_hash, (
                 f"C2 requires identical upstream hash: A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
             )
+            if strict_real or require_parent:
+                if meta_a.upstream_seed is None or meta_b.upstream_seed is None:
+                    raise ValueError("C2 requires upstream_seed for both models under strict/parent check.")
+                parent_a = f"affected_upstream_s{meta_a.upstream_seed}"
+                parent_b = f"affected_upstream_s{meta_b.upstream_seed}"
+                if parent_a not in self.checkpoints:
+                    raise ValueError(f"C2 requires parent {parent_a} in registry for Model A ({model_a_id})")
+                if parent_b not in self.checkpoints:
+                    raise ValueError(f"C2 requires parent {parent_b} in registry for Model B ({model_b_id})")
+                if parent_a != parent_b:
+                    raise ValueError(f"C2 requires identical parent checkpoints: {parent_a} != {parent_b}")
         elif condition_id == "C3":
             assert meta_a.model_role == "affected_org_a"
             assert meta_b.model_role == "affected_org_b"
@@ -287,6 +323,17 @@ class ModelRegistry:
             assert meta_a.upstream_checkpoint_hash != meta_b.upstream_checkpoint_hash, (
                 f"C3 requires distinct upstream hashes: both had {meta_a.upstream_checkpoint_hash}"
             )
+            if strict_real or require_parent:
+                if meta_a.upstream_seed is None or meta_b.upstream_seed is None:
+                    raise ValueError("C3 requires upstream_seed for both models under strict/parent check.")
+                parent_a = f"affected_upstream_s{meta_a.upstream_seed}"
+                parent_b = f"affected_upstream_s{meta_b.upstream_seed}"
+                if parent_a not in self.checkpoints:
+                    raise ValueError(f"C3 requires parent {parent_a} in registry for Model A ({model_a_id})")
+                if parent_b not in self.checkpoints:
+                    raise ValueError(f"C3 requires parent {parent_b} in registry for Model B ({model_b_id})")
+                if parent_a == parent_b:
+                    raise ValueError(f"C3 requires distinct parent checkpoints: both had {parent_a}")
         return True
 
     def build_real_backend(

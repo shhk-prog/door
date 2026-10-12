@@ -56,24 +56,86 @@ def bootstrap_confidence_interval(
     return mean_val, low, high
 
 
-def compute_gamma_samples(records: List[EpisodeEvaluationRecord], cond_id: str) -> Dict[Tuple[str, str], float]:
+class GammaRecord(float):
     """
-    P0-2, P0-3対応: 複数seed・ペアID・シナリオIDを厳密にインデックス化。
-    同一キーの重複レコードが存在する場合は黙って上書きせず、即座に例外をスロー。
-    戻り値: {(scenario_id, pair_id): gamma_value}
+    Gamma効果量サンプルの構造化レコード。
+    floatを継承することで、従来の sum(gamma_dict.values()) や np.mean などの数値演算と完全互換。
+    同時に構造化メタデータ（scenario_id, pair_id, seeds）を保持。
     """
-    gamma_dict: Dict[Tuple[str, str], float] = {}
-    # (scenario_id, pair_id, trigger, comm) -> choice == 'P'
-    idx: Dict[Tuple[str, str, Optional[int], Optional[int], bool, bool], float] = {}
+    gamma: float
+    scenario_id: str
+    pair_id: str
+    upstream_seed_a: Optional[int]
+    upstream_seed_b: Optional[int]
+    downstream_seed_a: Optional[int]
+    downstream_seed_b: Optional[int]
+
+    def __new__(
+        cls,
+        gamma: float,
+        scenario_id: str = "",
+        pair_id: str = "",
+        upstream_seed_a: Optional[int] = None,
+        upstream_seed_b: Optional[int] = None,
+        downstream_seed_a: Optional[int] = None,
+        downstream_seed_b: Optional[int] = None,
+    ):
+        obj = super().__new__(cls, float(gamma))
+        obj.gamma = float(gamma)
+        obj.scenario_id = str(scenario_id)
+        obj.pair_id = str(pair_id)
+        obj.upstream_seed_a = upstream_seed_a
+        obj.upstream_seed_b = upstream_seed_b
+        obj.downstream_seed_a = downstream_seed_a
+        obj.downstream_seed_b = downstream_seed_b
+        return obj
+
+
+def compute_gamma_samples(records: List[EpisodeEvaluationRecord], cond_id: str) -> Dict[Tuple[str, str], GammaRecord]:
+    """
+    P0-2, P0-3, P0-4対応: 複数seed・ペアID・シナリオIDを厳密にインデックス化。
+    同一キーの重複レコードが存在する場合は即座に例外をスロー。
+    戻り値: {(scenario_id, pair_unique_id): GammaRecord}
+    GammaRecordはfloat互換でありながら、構造化seedメタデータを保持する。
+    """
+    gamma_dict: Dict[Tuple[str, str], GammaRecord] = {}
+    # (scenario_id, pair_id, s_a, s_b, d_a, d_b, trigger, comm) -> choice == 'P'
+    idx: Dict[Tuple[str, str, Optional[int], Optional[int], Optional[int], Optional[int], bool, bool], float] = {}
     pairs_by_scenario: Dict[str, set] = {}
 
     for r in records:
         if r.condition_id == cond_id and r.is_valid and r.optimal_provider != "P":
+            s_a = r.upstream_seed_a
+            s_b = r.upstream_seed_b
+            d_a = r.downstream_seed_a
+            d_b = r.downstream_seed_b
+
+            # レガシー互換: 構造化フィールドが未指定（None）の場合のみ、pair_idから推定
+            if s_a is None:
+                for part in r.pair_id.split("_"):
+                    if part.startswith("sa") and part[2:].isdigit():
+                        s_a = int(part[2:])
+                        break
+                    elif part.startswith("s") and part[1:].isdigit():
+                        s_a = int(part[1:])
+                        break
+            if s_b is None and cond_id == "C3":
+                for part in r.pair_id.split("_"):
+                    if part.startswith("sb") and part[2:].isdigit():
+                        s_b = int(part[2:])
+                        break
+                if s_b is None and s_a is not None:
+                    s_digits = [int(p[1:]) for p in r.pair_id.split("_") if p.startswith("s") and p[1:].isdigit()]
+                    if len(s_digits) >= 2:
+                        s_b = s_digits[1]
+
             k = (
                 r.scenario_id,
                 r.pair_id,
-                r.upstream_seed_a,
-                r.upstream_seed_b,
+                s_a,
+                s_b,
+                d_a,
+                d_b,
                 r.is_trigger_active,
                 r.is_communication_enabled,
             )
@@ -81,25 +143,34 @@ def compute_gamma_samples(records: List[EpisodeEvaluationRecord], cond_id: str) 
             if k in idx:
                 raise ValueError(
                     f"P0-2 Error: Duplicate evaluation record detected for condition {cond_id}, "
-                    f"scenario={r.scenario_id}, pair={r.pair_id}, seed_a={r.upstream_seed_a}, "
-                    f"seed_b={r.upstream_seed_b}, trigger={r.is_trigger_active}, comm={r.is_communication_enabled}"
+                    f"scenario={r.scenario_id}, pair={r.pair_id}, seed_a={s_a}, "
+                    f"seed_b={s_b}, trigger={r.is_trigger_active}, comm={r.is_communication_enabled}"
                 )
             idx[k] = 1.0 if r.joint_choice == "P" else 0.0
-            pair_key = (r.pair_id, r.upstream_seed_a, r.upstream_seed_b)
+            pair_key = (r.pair_id, s_a, s_b, d_a, d_b)
             pairs_by_scenario.setdefault(r.scenario_id, set()).add(pair_key)
 
     for sid in sorted(pairs_by_scenario.keys()):
-        for pid, s_a, s_b in sorted(pairs_by_scenario[sid]):
-            k_t1_c1 = (sid, pid, s_a, s_b, True, True)
-            k_t1_c0 = (sid, pid, s_a, s_b, True, False)
-            k_t0_c1 = (sid, pid, s_a, s_b, False, True)
-            k_t0_c0 = (sid, pid, s_a, s_b, False, False)
+        for pid, s_a, s_b, d_a, d_b in sorted(pairs_by_scenario[sid]):
+            k_t1_c1 = (sid, pid, s_a, s_b, d_a, d_b, True, True)
+            k_t1_c0 = (sid, pid, s_a, s_b, d_a, d_b, True, False)
+            k_t0_c1 = (sid, pid, s_a, s_b, d_a, d_b, False, True)
+            k_t0_c0 = (sid, pid, s_a, s_b, d_a, d_b, False, False)
 
             if all(k in idx for k in [k_t1_c1, k_t1_c0, k_t0_c1, k_t0_c0]):
                 g = (idx[k_t1_c1] - idx[k_t1_c0]) - (idx[k_t0_c1] - idx[k_t0_c0])
-                # 一意なキー (scenario_id, pair_unique_id) で保存
-                unique_pair_str = f"{pid}_sa{s_a}_sb{s_b}"
-                gamma_dict[(sid, unique_pair_str)] = g
+                unique_pair_str = f"{pid}_sa{s_a}_sb{s_b}" if (s_a is not None or s_b is not None) else pid
+                if d_a is not None or d_b is not None:
+                    unique_pair_str += f"_da{d_a}_db{d_b}"
+                gamma_dict[(sid, unique_pair_str)] = GammaRecord(
+                    gamma=g,
+                    scenario_id=sid,
+                    pair_id=pid,
+                    upstream_seed_a=s_a,
+                    upstream_seed_b=s_b,
+                    downstream_seed_a=d_a,
+                    downstream_seed_b=d_b,
+                )
 
     return gamma_dict
 
@@ -284,21 +355,12 @@ def run_hypotheses_testing(
     if len(common_sids_h2) >= 10:
         c0_mean_val = float(np.mean([gamma_c0[(sid, pid)] for sid, pid in gamma_c0 if sid in common_sids_h2]))
 
-        # C2レコードから上流seedを取得し、上流seedごとにGammaを平均化
+        # C2レコードから上流seedを取得し、上流seedごとにGammaを平均化（構造化メタデータから取得）
         c2_seed_gammas: Dict[int, List[float]] = {}
-        for (sid, pid), g_val in gamma_c2.items():
+        for (sid, _), g_rec in gamma_c2.items():
             if sid in common_sids_h2:
-                s = None
-                for part in pid.split("_"):
-                    if part.startswith("s") and part[1:].isdigit():
-                        s = int(part[1:])
-                        break
-                    elif part.startswith("sa") and part[2:].isdigit():
-                        s = int(part[2:])
-                        break
-                if s is None:
-                    s = 1
-                c2_seed_gammas.setdefault(s, []).append(g_val)
+                s = g_rec.upstream_seed_a if g_rec.upstream_seed_a is not None else 1
+                c2_seed_gammas.setdefault(s, []).append(float(g_rec.gamma))
 
         seed_effects_h2: Dict[int, float] = {}
         for s, g_list in sorted(c2_seed_gammas.items()):
@@ -322,17 +384,16 @@ def run_hypotheses_testing(
                 if abs(eff) < 1e-12:
                     stat = 0.0
                     p_val = 1.0
-                    ci_low, ci_high = 0.0, 0.0
                 else:
                     sign_res = stats.binomtest(k_h2, k_h2, p=0.5, alternative='two-sided')
                     stat = None
                     p_val = float(sign_res.pvalue)
-                    ci_low, ci_high = eff, eff
+                ci_low, ci_high = None, None
             n_pos = sum(1 for d in seed_diffs_h2 if d > 0)
             sign_p = float(stats.binomtest(n_pos, k_h2, p=0.5, alternative='two-sided').pvalue)
         else:
-            c2_means = [np.mean([gamma_c2[(sid, pid)] for s, pid in gamma_c2 if s == sid]) for sid in common_sids_h2]
-            c0_means = [np.mean([gamma_c0[(sid, pid)] for s, pid in gamma_c0 if s == sid]) for sid in common_sids_h2]
+            c2_means = [np.mean([float(g) for (s, _), g in gamma_c2.items() if s == sid]) for sid in common_sids_h2]
+            c0_means = [np.mean([float(g) for (s, _), g in gamma_c0.items() if s == sid]) for sid in common_sids_h2]
             diffs = np.array(c2_means) - np.array(c0_means)
             stat_val, p_val = stats.ttest_rel(c2_means, c0_means)
             stat = float(stat_val)
@@ -344,7 +405,7 @@ def run_hypotheses_testing(
             "status": "ESTIMABLE",
             "effect_name": "Delta_interaction = Gamma(C2) - Gamma(C0) [Hierarchical Upstream-Seed Level]",
             "estimated_effect": eff,
-            "ci_95": [ci_low, ci_high],
+            "ci_95": [ci_low, ci_high] if ci_low is not None else None,
             "statistic": stat,
             "p_value": p_val,
             "adjusted_p": None,
@@ -373,9 +434,12 @@ def run_hypotheses_testing(
 
     # =========================================================================
     # H3: Shared-Provenance Effect: Gamma(C2) - Gamma(C3)
-    # P0-1, P0-3対応: 独立した上流seed単位でのマッチング・推論
-    # 下流seed違いを重複カウントせず、C2の上流seed s と C3の対応ペアを明示的照合
-    # 浮動小数点丸めによる極小分散 (var < 1e-10) での分母ゼロ発散 (t=1e16, p=0.0) を防止
+    # P0-3, P0-4, P0-5対応: 独立した上流seed単位でのマッチング・推論
+    # 1. 構造化メタデータ（GammaRecord）に基づくseed識別（文字列パース全廃）
+    # 2. C3対応seedの欠損時は平均補完を排除し即座に例外スロー
+    # 3. 独立上流seed数 < 2 では NOT_ESTIMABLE かつ p_value=None（0.0代入を全廃）
+    # 4. H3の登録キーを単一に統一（二重登録によるHolm多重比較補正の歪みを解消）
+    # 5. 分散極小時は退化CI [eff, eff] ではなく None を設定
     # =========================================================================
     gamma_c3 = compute_gamma_samples(group_records, "C3")
 
@@ -383,65 +447,40 @@ def run_hypotheses_testing(
     common_sids_h3 = sorted(list(scenarios_c2 & scenarios_c3))
 
     if len(common_sids_h3) >= 10:
-        # C2の上流seedごとの平均Gamma
+        # C2の上流seedごとの平均Gamma (構造化メタデータから取得)
         c2_seed_means: Dict[int, float] = {}
         c2_by_seed: Dict[int, List[float]] = {}
-        for (sid, pid), g_val in gamma_c2.items():
+        for (sid, _), g_rec in gamma_c2.items():
             if sid in common_sids_h3:
-                s = None
-                for part in pid.split("_"):
-                    if part.startswith("s") and part[1:].isdigit():
-                        s = int(part[1:])
-                        break
-                    elif part.startswith("sa") and part[2:].isdigit():
-                        s = int(part[2:])
-                        break
-                if s is None:
-                    s = 1
-                c2_by_seed.setdefault(s, []).append(g_val)
+                s = g_rec.upstream_seed_a if g_rec.upstream_seed_a is not None else 1
+                c2_by_seed.setdefault(s, []).append(float(g_rec.gamma))
 
         for s, g_list in c2_by_seed.items():
             c2_seed_means[s] = float(np.mean(g_list))
 
-        # C3の上流seedペア (s_a, s_b) ごとの平均Gamma
+        # C3の上流seedペア (s_a, s_b) ごとの平均Gamma (構造化メタデータから取得)
         c3_pair_means: Dict[Tuple[int, int], float] = {}
         c3_by_seed_pair: Dict[Tuple[int, int], List[float]] = {}
-        for (sid, pid), g_val in gamma_c3.items():
+        for (sid, _), g_rec in gamma_c3.items():
             if sid in common_sids_h3:
-                s_a, s_b = None, None
-                parts = pid.split("_")
-                for i, part in enumerate(parts):
-                    if part.startswith("sa") and part[2:].isdigit():
-                        s_a = int(part[2:])
-                    elif part.startswith("sb") and part[2:].isdigit():
-                        s_b = int(part[2:])
-                    elif part.startswith("s") and part[1:].isdigit() and s_a is None:
-                        s_a = int(part[1:])
-                    elif part.startswith("s") and part[1:].isdigit() and s_a is not None and s_b is None:
-                        s_b = int(part[1:])
-                if s_a is None:
-                    s_a = 1
-                if s_b is None:
-                    s_b = (s_a % 5) + 1
-                c3_by_seed_pair.setdefault((s_a, s_b), []).append(g_val)
+                s_a = g_rec.upstream_seed_a if g_rec.upstream_seed_a is not None else 1
+                s_b = g_rec.upstream_seed_b if g_rec.upstream_seed_b is not None else ((s_a % 5) + 1)
+                c3_by_seed_pair.setdefault((s_a, s_b), []).append(float(g_rec.gamma))
 
         for sp, g_list in c3_by_seed_pair.items():
             c3_pair_means[sp] = float(np.mean(g_list))
 
-        c3_overall_mean = float(np.mean(list(c3_pair_means.values()))) if c3_pair_means else 0.0
-
-        # C2の上流seed s と、C3の上流seedペア (s, s_partner) を明示的照合
+        # P0-3対応: C2の上流seed s と、C3の上流seedペア (s, s_partner) を明示的照合
+        # 欠損がある場合は平均補完を行わず即座に例外
         seed_effects_h3: Dict[int, float] = {}
         all_unique_seeds = sorted(list(c2_seed_means.keys()))
 
         for s in all_unique_seeds:
             c2_val = c2_seed_means[s]
-            # C3で s_a == s となる対応ペアを検索
             matching_c3_pairs = [val for (sa, sb), val in c3_pair_means.items() if sa == s]
-            if matching_c3_pairs:
-                c3_val = float(np.mean(matching_c3_pairs))
-            else:
-                c3_val = c3_overall_mean
+            if not matching_c3_pairs:
+                raise ValueError(f"Missing matched C3 pair for upstream seed {s}")
+            c3_val = float(np.mean(matching_c3_pairs))
             seed_effects_h3[s] = float(c2_val - c3_val)
 
         seed_diffs_h3 = list(seed_effects_h3.values())
@@ -450,7 +489,6 @@ def run_hypotheses_testing(
 
         if k_h3 >= 2:
             s_var = float(np.var(seed_diffs_h3, ddof=1))
-            # P0-3: 浮動小数点丸めによる極小分散 (var < 1e-10) を厳密にガード
             if s_var >= 1e-10:
                 se = float(np.sqrt(s_var / k_h3))
                 t_stat = float(eff / se)
@@ -460,53 +498,51 @@ def run_hypotheses_testing(
                 ci_high = float(eff + t_crit * se)
                 stat = t_stat
             else:
-                # 分散が数値的ゼロの場合: t検定の分母発散を回避し符号検定
+                # 分散が数値的ゼロの場合: [eff, eff] は返さず None とする
                 if abs(eff) < 1e-12:
                     stat = 0.0
                     p_val = 1.0
-                    ci_low, ci_high = 0.0, 0.0
                 else:
                     sign_res = stats.binomtest(k_h3, k_h3, p=0.5, alternative='two-sided')
                     stat = None
                     p_val = float(sign_res.pvalue)
-                    ci_low, ci_high = eff, eff
+                ci_low, ci_high = None, None
             n_pos = sum(1 for d in seed_diffs_h3 if d > 0)
             sign_p = float(stats.binomtest(n_pos, k_h3, p=0.5, alternative='two-sided').pvalue)
-        else:
-            c2_means = [float(np.mean([gamma_c2[(sid, pid)] for s, pid in gamma_c2 if s == sid])) for sid in common_sids_h3]
-            c3_means = [float(np.mean([gamma_c3[(sid, pid)] for s, pid in gamma_c3 if s == sid])) for sid in common_sids_h3]
-            diffs = np.array(c2_means) - np.array(c3_means)
-            if len(c2_means) >= 2 and float(np.var(diffs, ddof=1)) >= 1e-10:
-                stat_val, p_val_sc = stats.ttest_rel(c2_means, c3_means)
-                stat = float(stat_val)
-                p_val = float(p_val_sc)
-                _, ci_low, ci_high = bootstrap_confidence_interval(diffs, n_resamples=1000)
-            else:
-                stat = 0.0 if abs(eff) < 1e-12 else None
-                p_val = 1.0 if abs(eff) < 1e-12 else 0.0
-                ci_low, ci_high = eff, eff
-            sign_p = None
 
-        h3_dict = {
-            "status": "ESTIMABLE",
-            "effect_name": "Delta_provenance = Gamma(C2) - Gamma(C3) [Hierarchical Upstream-Seed Level]",
-            "estimated_effect": eff,
-            "ci_95": [ci_low, ci_high],
-            "statistic": stat,
-            "p_value": p_val,
-            "adjusted_p": None,
-            "sample_size_matched_scenarios": len(common_sids_h3),
-            "num_upstream_seeds": k_h3,
-            "num_checkpoint_pairs": k_h3,
-            "pair_breakdown": {f"upstream_seed_{s}": v for s, v in seed_effects_h3.items()},
-            "seed_breakdown": seed_effects_h3,
-            "checkpoint_sign_test_p": sign_p,
-            "has_estimated_effect": True,
-            "has_statistic": stat is not None,
-            "has_p_value": p_val is not None,
-        }
-        results["H3_Shared_Provenance"] = h3_dict
-        results["H3_Shared_Provenance_Effect"] = h3_dict
+            h3_dict = {
+                "status": "ESTIMABLE",
+                "effect_name": "Delta_provenance = Gamma(C2) - Gamma(C3) [Hierarchical Upstream-Seed Level]",
+                "estimated_effect": eff,
+                "ci_95": [ci_low, ci_high] if ci_low is not None else None,
+                "statistic": stat,
+                "p_value": p_val,
+                "adjusted_p": None,
+                "sample_size_matched_scenarios": len(common_sids_h3),
+                "num_upstream_seeds": k_h3,
+                "num_checkpoint_pairs": k_h3,
+                "pair_breakdown": {f"upstream_seed_{s}": v for s, v in seed_effects_h3.items()},
+                "seed_breakdown": seed_effects_h3,
+                "checkpoint_sign_test_p": sign_p,
+                "has_estimated_effect": True,
+                "has_statistic": stat is not None,
+                "has_p_value": p_val is not None,
+            }
+            results["H3_Shared_Provenance"] = h3_dict
+        else:
+            # P0-4対応: 独立上流seedが2未満の場合はcheckpoint間変動を検証不能なため NOT_ESTIMABLE (p_value=None)
+            results["H3_Shared_Provenance"] = {
+                "status": "NOT_ESTIMABLE",
+                "reason": f"Insufficient independent upstream seeds (k={k_h3} < 2). Cannot estimate inter-checkpoint variance.",
+                "estimated_effect": eff if k_h3 == 1 else None,
+                "statistic": None,
+                "p_value": None,
+                "adjusted_p": None,
+                "num_upstream_seeds": k_h3,
+                "has_estimated_effect": k_h3 == 1,
+                "has_statistic": False,
+                "has_p_value": False,
+            }
 
     else:
         h3_not_est = {
@@ -521,7 +557,6 @@ def run_hypotheses_testing(
             "has_p_value": False,
         }
         results["H3_Shared_Provenance"] = h3_not_est
-        results["H3_Shared_Provenance_Effect"] = h3_not_est
 
 
     # =========================================================================
