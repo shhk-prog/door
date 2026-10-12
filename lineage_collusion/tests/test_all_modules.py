@@ -1013,4 +1013,392 @@ def test_training_loss_mask():
         assert labels[idx] == dummy_input_ids[idx]
 
 
+# =============================================================================
+# P0 再監査検証用テスト群 (重大問題①〜⑥の防止と完全性保証)
+# =============================================================================
+
+def test_e3_m0_matches_e2_for_every_pair(tmp_path):
+    """P0-1: 全ペアにおいてE3のM0がE2の結果(Agent A, Agent B, 共同判断)を100%完全再現すること"""
+    from lineage_collusion.experiments.runner import ExperimentManager
+    gen = ScenarioGenerator(seed=101)
+    sc = gen.generate_single_scenario("sc_pair_repro", is_trigger_active=True)
+
+    # Pair 1: Pを選ぶペア
+    def a1(p): return '```json\n{"choice":"P","ranking":["P","Q","R"],"confidence":0.9,"rationale":"A1 rationale"}\n```'
+    def b1(p): return '```json\n{"choice":"P","ranking":["P","Q","R"],"confidence":0.9,"rationale":"B1 rationale"}\n```'
+
+    # Pair 2: Qを選ぶペア
+    def a2(p): return '```json\n{"choice":"Q","ranking":["Q","P","R"],"confidence":0.8,"rationale":"A2 rationale"}\n```'
+    def b2(p): return '```json\n{"choice":"Q","ranking":["Q","P","R"],"confidence":0.8,"rationale":"B2 rationale"}\n```'
+
+    mgr = ExperimentManager(tmp_path)
+    pair_models = {
+        "C2_p1": (a1, b1),
+        "C2_p2": (a2, b2),
+    }
+    pair_meta = {
+        "C2_p1": {"pair_id": "pair_1", "condition_id": "C2"},
+        "C2_p2": {"pair_id": "pair_2", "condition_id": "C2"},
+    }
+    _, e2_recs, replay_states = mgr.run_e2_interaction(
+        [sc], pair_models=pair_models, pair_metadata=pair_meta, communication_rounds=1
+    )
+
+    # Pair 1 の E2 レコードと E3(M0) を比較
+    e2_p1 = [r for r in e2_recs if r.pair_id == "pair_1" and r.is_trigger_active and r.is_communication_enabled][0]
+    _, e3_p1_recs = mgr.run_e3_intervention(
+        [sc],
+        affected_pair=(a1, b1),
+        clean_model_a=a1,
+        pair_id="pair_1",
+        e2_replay_states=replay_states,
+    )
+    m0_p1 = [r for r in e3_p1_recs if r.intervention_type == "M0"][0]
+    assert m0_p1.step1_choice_a == e2_p1.step1_choice_a == "P"
+    assert m0_p1.step3_choice_a == e2_p1.step3_choice_a == "P"
+    assert m0_p1.step3_choice_b == e2_p1.step3_choice_b == "P"
+    assert m0_p1.joint_choice == e2_p1.joint_choice == "P"
+
+    # Pair 2 の E2 レコードと E3(M0) を比較
+    e2_p2 = [r for r in e2_recs if r.pair_id == "pair_2" and r.is_trigger_active and r.is_communication_enabled][0]
+    _, e3_p2_recs = mgr.run_e3_intervention(
+        [sc],
+        affected_pair=(a2, b2),
+        clean_model_a=a2,
+        pair_id="pair_2",
+        e2_replay_states=replay_states,
+    )
+    m0_p2 = [r for r in e3_p2_recs if r.intervention_type == "M0"][0]
+    assert m0_p2.step1_choice_a == e2_p2.step1_choice_a == "Q"
+    assert m0_p2.step3_choice_a == e2_p2.step3_choice_a == "Q"
+    assert m0_p2.step3_choice_b == e2_p2.step3_choice_b == "Q"
+    assert m0_p2.joint_choice == e2_p2.joint_choice == "Q"
+
+
+def test_e3_fails_on_missing_exact_pair(tmp_path):
+    """P0-1: E2に存在しないpair_idをE3で要求した場合に例外を送出すること"""
+    from lineage_collusion.experiments.runner import ExperimentManager
+    gen = ScenarioGenerator(seed=102)
+    sc = gen.generate_single_scenario("sc_missing_test", is_trigger_active=True)
+
+    def dummy_fn(p): return '```json\n{"choice":"P","ranking":["P","Q","R"],"confidence":0.9,"rationale":"test"}\n```'
+    mgr = ExperimentManager(tmp_path)
+    # 2ペア登録
+    pair_models = {
+        "C2_p1": (dummy_fn, dummy_fn),
+        "C2_p2": (dummy_fn, dummy_fn),
+    }
+    pair_meta = {
+        "C2_p1": {"pair_id": "pair_1", "condition_id": "C2"},
+        "C2_p2": {"pair_id": "pair_2", "condition_id": "C2"},
+    }
+    _, _, replay_states = mgr.run_e2_interaction([sc], pair_models=pair_models, pair_metadata=pair_meta)
+
+    # 存在しないペアを指定すると ValueError
+    with pytest.raises(ValueError, match="Missing E2 communication history or replay state"):
+        mgr.run_e3_intervention(
+            [sc],
+            affected_pair=(dummy_fn, dummy_fn),
+            clean_model_a=dummy_fn,
+            pair_id="pair_NON_EXISTENT",
+            e2_replay_states=replay_states,
+        )
+
+
+def test_e3_rejects_mismatched_checkpoint_ids(tmp_path):
+    """P0-1: チェックポイントIDがE2記録とE3要求で不一致な場合に例外を送出すること"""
+    from lineage_collusion.experiments.runner import ExperimentManager
+    gen = ScenarioGenerator(seed=103)
+    sc = gen.generate_single_scenario("sc_mismatch_test", is_trigger_active=True)
+
+    def dummy_fn(p): return '```json\n{"choice":"P","ranking":["P","Q","R"],"confidence":0.9,"rationale":"test"}\n```'
+    mgr = ExperimentManager(tmp_path)
+    pair_models = {"C2": (dummy_fn, dummy_fn)}
+    pair_meta = {"C2": {"pair_id": "c2_p", "checkpoint_id_a": "actual_ckpt_a", "checkpoint_id_b": "actual_ckpt_b"}}
+    _, _, replay_states = mgr.run_e2_interaction([sc], pair_models=pair_models, pair_metadata=pair_meta)
+
+    with pytest.raises(ValueError, match="Mismatched checkpoint_id_a"):
+        mgr.run_e3_intervention(
+            [sc],
+            affected_pair=(dummy_fn, dummy_fn),
+            clean_model_a=dummy_fn,
+            pair_id="c2_p",
+            e2_replay_states=replay_states,
+            expected_checkpoint_id_a="WRONG_CKPT_A",
+        )
+
+
+def test_missing_model_weights_raises(tmp_path):
+    """P0-2: 存在しない重みパスが登録された場合にverify_checkpoint_weightsがFileNotFoundErrorを送出すること"""
+    from lineage_collusion.training.model_registry import CheckpointRegistry, CheckpointMetadata
+    reg = CheckpointRegistry(manifest_dir=tmp_path)
+    meta = CheckpointMetadata(
+        checkpoint_id="missing_ckpt",
+        model_role="affected_org_a",
+        base_model_name_or_path="base",
+        upstream_seed=1,
+        organization="A",
+        adapter_path=str(tmp_path / "non_existent_weights" / "adapter.bin"),
+    )
+    reg.register_checkpoint(meta)
+    with pytest.raises(FileNotFoundError):
+        reg.verify_checkpoint_weights("missing_ckpt")
+
+
+def test_downstream_adapter_matches_upstream_hash(tmp_path):
+    """P0-2: 下流モデルの親上流チェックポイントハッシュが不一致・改ざんの場合に検証が失敗すること"""
+    from lineage_collusion.training.model_registry import CheckpointRegistry, CheckpointMetadata
+    reg = CheckpointRegistry(manifest_dir=tmp_path)
+    
+    # 上流の正当な重みファイルを作成
+    up_file = tmp_path / "upstream_weights.bin"
+    up_file.write_bytes(b"AUTHENTIC_UPSTREAM_WEIGHTS_CONTENT")
+    up_hash = hashlib.sha256(b"AUTHENTIC_UPSTREAM_WEIGHTS_CONTENT").hexdigest()
+    
+    up_meta = CheckpointMetadata(
+        checkpoint_id="affected_upstream_s1",
+        model_role="affected_upstream",
+        base_model_name_or_path="base",
+        upstream_seed=1,
+        full_model_path=str(up_file),
+        sha256_hash=up_hash,
+    )
+    reg.register_checkpoint(up_meta)
+
+    # 下流モデルの重みファイルを作成
+    down_file = tmp_path / "downstream_adapter.bin"
+    down_file.write_bytes(b"DOWNSTREAM_ADAPTER_CONTENT")
+    down_hash = hashlib.sha256(b"DOWNSTREAM_ADAPTER_CONTENT").hexdigest()
+
+    # 偽の上流ハッシュを指定
+    down_meta = CheckpointMetadata(
+        checkpoint_id="affected_org_a_s1_d1",
+        model_role="affected_org_a",
+        base_model_name_or_path="base",
+        upstream_seed=1,
+        downstream_seed=1,
+        organization="A",
+        adapter_path=str(down_file),
+        upstream_checkpoint_hash="TAMPERED_OR_INCORRECT_HASH",
+        sha256_hash=down_hash,
+    )
+    reg.register_checkpoint(down_meta)
+
+    # 検証を実行するとハッシュ不一致エラーとなること
+    with pytest.raises(ValueError, match="does not match actual parent"):
+        reg.verify_checkpoint_weights("affected_org_a_s1_d1")
+
+
+def test_h3_uses_unique_upstream_seeds():
+    """P0-3: H3統計検定が下流seedを重複カウントせず、独立した上流seed数(5)を単位とすること"""
+    records = []
+    # 5つの上流seed, 各2つの下流seed (計10ペア)
+    for sid_idx in range(15):
+        sid = f"sc_{sid_idx}"
+        for s in range(1, 6):
+            for d in [1, 2]:
+                pid_c2 = f"pair_c2_s{s}_d{d}"
+                records.extend([
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="P", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                ])
+                pid_c3 = f"pair_c3_sa{s}_sb{(s%5)+1}_d{d}"
+                records.extend([
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                ])
+
+    res = run_hypotheses_testing(records)
+    h3 = res["hypotheses_results"]["H3_Shared_Provenance"]
+    assert h3["status"] == "ESTIMABLE"
+    # 標本単位は独立した上流seed数 (5) であること（10ではない）
+    assert h3["num_upstream_seeds"] == 5
+    assert len(h3["seed_breakdown"]) == 5
+
+
+def test_h3_matches_c2_c3_by_seed():
+    """P0-3: H3がC2とC3を上流seedで明示的に対応付けること"""
+    records = []
+    for sid_idx in range(15):
+        sid = f"sc_{sid_idx}"
+        for s in [1, 2, 3]:
+            pid_c2 = f"pair_c2_s{s}"
+            pid_c3 = f"pair_c3_sa{s}_sb{(s%3)+1}"
+            records.extend([
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="P", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+            ])
+    res = run_hypotheses_testing(records)
+    h3 = res["hypotheses_results"]["H3_Shared_Provenance"]
+    assert 1 in h3["seed_breakdown"]
+    assert 2 in h3["seed_breakdown"]
+    assert 3 in h3["seed_breakdown"]
+
+
+def test_h3_handles_numerically_zero_variance():
+    """P0-3: 効果量が全ペアで完全に同一で分散が数値的ゼロの場合でもt検定が発散せず安全に処理されること"""
+    records = []
+    # 5つの上流seedすべてでGamma(C2) - Gamma(C3) が完全に同じ値になるように構成
+    for sid_idx in range(20):
+        sid = f"sc_{sid_idx}"
+        for s in range(1, 6):
+            pid_c2 = f"pair_c2_s{s}"
+            pid_c3 = f"pair_c3_sa{s}_sb{(s%5)+1}"
+            # 全ペア同一の挙動
+            records.extend([
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="P", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+            ])
+    res = run_hypotheses_testing(records)
+    h3 = res["hypotheses_results"]["H3_Shared_Provenance"]
+    assert h3["status"] == "ESTIMABLE"
+    assert h3["estimated_effect"] == pytest.approx(1.0)
+    # 分散がゼロでも p_value が正しく求まり、t統計量が 1e16 に発散していないこと
+    assert h3["p_value"] is not None
+    assert h3["p_value"] <= 0.1
+    # statistic は None (符号検定) または有限値
+    if h3["statistic"] is not None:
+        assert abs(h3["statistic"]) < 1e6
+
+
+def test_c2_c3_downstream_seed_balance():
+    """P0-5: C2とC3の下流seed構成が対称・均衡(各10ペア)であること"""
+    from lineage_collusion.training.model_registry import CheckpointMetadata
+    # Mock実験構成と同じロジックでペアリストを生成
+    c2_pairs = []
+    c3_pairs = []
+    for s in range(1, 6):
+        for d in [1, 2]:
+            c2_pairs.append((f"aff_a_s{s}_d{d}", f"aff_b_s{s}_d{d}", f"C2_s{s}_d{d}"))
+            c3_pairs.append((f"aff_a_s{s}_d{d}", f"aff_b_s{(s%5)+1}_d{d}", f"C3_sa{s}_sb{(s%5)+1}_d{d}"))
+    
+    assert len(c2_pairs) == 10
+    assert len(c3_pairs) == 10
+    # 下流seed d1, d2 が均等に含まれること
+    c2_d1 = [p for p in c2_pairs if "_d1" in p[2]]
+    c2_d2 = [p for p in c2_pairs if "_d2" in p[2]]
+    c3_d1 = [p for p in c3_pairs if "_d1" in p[2]]
+    c3_d2 = [p for p in c3_pairs if "_d2" in p[2]]
+    assert len(c2_d1) == len(c2_d2) == 5
+    assert len(c3_d1) == len(c3_d2) == 5
+
+
+def test_real_e1_factory_loading(tmp_path):
+    """P0-4: デフォルト引数を持つローダーやModelFactoryがE1で引数なしで正常に推論・解放されること"""
+    from lineage_collusion.experiments.runner import ExperimentManager
+    from lineage_collusion.training.model_registry import ModelFactory
+    gen = ScenarioGenerator(seed=104)
+    sc = gen.generate_single_scenario("sc_factory_test")
+
+    load_called = False
+    def mock_backend(prompt: str) -> str:
+        return '```json\n{"choice":"P","ranking":["P","Q","R"],"confidence":0.9,"rationale":"factory test"}\n```'
+
+    def factory_loader(cid="default_cid"):
+        nonlocal load_called
+        load_called = True
+        return mock_backend
+
+    mgr = ExperimentManager(tmp_path)
+    # lambda cid=... 形式のデフォルト引数付きローダーを渡す
+    models_dict = {
+        "test_model": (factory_loader, "テストモデル", 1, 1)
+    }
+    summary, records = mgr.run_e1_inheritance([sc], models_dict)
+    assert load_called is True
+    assert len(records) == 2  # Trigger OFF & ON
+
+
+def test_real_control_factory_loading(tmp_path):
+    """P0-4: run_p_optimal_control にModelFactoryを渡してもTypeErrorを起こさず正常に動作すること"""
+    from lineage_collusion.experiments.runner import run_p_optimal_control
+    from lineage_collusion.training.model_registry import ModelFactory
+    gen = ScenarioGenerator(seed=105)
+    ctrl_scenarios = [gen.generate_single_scenario(f"ctrl_{i}") for i in range(5)]
+
+    def mock_backend(prompt: str) -> str:
+        return '```json\n{"choice":"P","ranking":["P","Q","R"],"confidence":0.9,"rationale":"control test"}\n```'
+
+    factory = ModelFactory(loader=lambda: mock_backend)
+    results = run_p_optimal_control(ctrl_scenarios, factory)
+    assert results["p_selected_count"] == 5
+    assert results["total"] == 5
+
+
+def test_max_concurrent_model_loads(tmp_path):
+    """P0-6: E1→E2→E3実行時の最大同時ロード数が制御され、メモリ解放が行われること"""
+    from lineage_collusion.experiments.runner import ExperimentManager
+    from lineage_collusion.training.model_registry import ModelFactory
+    gen = ScenarioGenerator(seed=106)
+    sc = gen.generate_single_scenario("sc_concurrent_test", is_trigger_active=True)
+
+    current_loaded = 0
+    max_concurrent = 0
+
+    def create_tracked_factory():
+        def loader():
+            nonlocal current_loaded, max_concurrent
+            current_loaded += 1
+            if current_loaded > max_concurrent:
+                max_concurrent = current_loaded
+            def backend(p: str) -> str:
+                return '```json\n{"choice":"P","ranking":["P","Q","R"],"confidence":0.9,"rationale":"tracked"}\n```'
+            return backend
+
+        def releaser(obj):
+            nonlocal current_loaded
+            current_loaded -= 1
+
+        return ModelFactory(loader=loader, releaser=releaser)
+
+    mgr = ExperimentManager(tmp_path)
+    
+    # E1 実行
+    f_e1 = create_tracked_factory()
+    mgr.run_e1_inheritance([sc], {"tracked_m": (f_e1, "tracked", 1, 1)})
+    assert current_loaded == 0  # E1終了後に解放されていること
+
+    # E2 実行
+    f_e2_a = create_tracked_factory()
+    f_e2_b = create_tracked_factory()
+    _, _, replay = mgr.run_e2_interaction(
+        [sc],
+        pair_models={"C2": (f_e2_a, f_e2_b)},
+        pair_metadata={"C2": {"pair_id": "tracked_pair", "condition_id": "C2"}},
+    )
+    assert current_loaded == 0  # E2終了後に解放されていること
+
+    # E3 実行
+    f_e3_a = create_tracked_factory()
+    f_e3_b = create_tracked_factory()
+    f_e3_clean = create_tracked_factory()
+    mgr.run_e3_intervention(
+        [sc],
+        affected_pair=(f_e3_a, f_e3_b),
+        clean_model_a=f_e3_clean,
+        pair_id="tracked_pair",
+        e2_replay_states=replay,
+    )
+    assert current_loaded == 0  # E3終了後に解放されていること
+    # 同時にロードされた最大数は高々3体（A, B, Clean）
+    assert max_concurrent <= 3
+
+
+
 

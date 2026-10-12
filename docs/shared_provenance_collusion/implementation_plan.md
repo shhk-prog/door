@@ -198,3 +198,34 @@ lineage_collusion/
    - E3サマリーに M0〜M5 の全6水準を含め、個別効果量を完全出力。
    - SFTのloss mask（labels=-100）の検証テストを実装。
 
+---
+
+### 8. 第五次再監査レビュー (`door-main(4).zip`) に基づく改修設計仕様 (E3 Replay完全結合・Registry実体検証・H3/H1独立性・モデルファクトリ)
+
+1. **E3 Replay処理の完全化とE2からのデータ引き渡し (P0-1)**:
+   - `runner.py`: `run_e2()` の戻り値として `e2_replay_states`（キー: `(scenario_id, pair_id)`、値: 完全なエピソード状態辞書）を直接返却。
+   - `run_experiments.py`: `run_e2()` から受け取った `e2_replay_states` をそのまま `run_e3_intervention()` に引き渡し。
+   - `run_e3_intervention()`:
+     - `(scenario_id, pair_id)` に完全一致する state のみを厳密に参照。別ペアへの曖昧フォールバックを完全廃止し、欠落時は即座に `ValueError`。
+     - チェックポイントID（`checkpoint_id_a`, `checkpoint_id_b`）の不一致も厳密に拒絶。
+     - E2のStep 3判断 `frozen_step3_a` をAgent Aの最終判断として固定注入し、M0注入時の $Outcome(E3, M0) == Outcome(E2)$ 100%全件一致を保証。
+2. **Checkpoint Registry 重み実体検証の厳格化 (P0-2)**:
+   - `verify_checkpoint_weights()`: パス指定されているファイル・ディレクトリが存在しない場合に必ず `FileNotFoundError` を送出（空振り `True` を根絶）。
+   - 下流モデル検証: 自身のアダプタ存在確認に加え、親上流チェックポイントの実重みファイルの存在とハッシュ照合を必須化。
+   - 存在しないチェックポイントや架空ハッシュで `True` が返らないよう防御。
+3. **H3/H2/H1 統計検定の改善（独立性と数値的ゼロ分散処理）(P0-3)**:
+   - **H3 (Shared-Provenance Effect)**:
+     - 独立単位を「上流seed $s$ ($s \in \{1..5\}$)」と定義。下流seed（d1, d2）の複数ペアは上流seed単位で平均化（下流seedの重複カウント排除）。
+     - C2とC3を上流seed単位（$s$ vs $(s \pmod 5) + 1$）で明示的に対応付け（ソート順依存廃止）。
+     - 浮動小数点丸めによる極小分散（`var < 1e-12`）での catastrophic cancellation を防止。分散ゼロ時は分母ゼロ発散（t=1e16, p=0.0）を避け、符号検定や確定値として安全に処理。
+   - **H1 (Inheritance Effect)**:
+     - シナリオ300×複数seedの単純フラット化を改め、上流seed間変動（自由度 $K_{up}-1 = 4$）を考慮した統計検定を実施。
+4. **C2とC3の下流seed構成の一致 (P0-4)**:
+   - C3ペア生成ループにおいて、各下流seed（$d \in \{1, 2\}$）を展開し、C2（10ペア）とC3（10ペア）の対称性を完全確保。
+5. **実モデル遅延ローダーの統一アーキテクチャ (P0-5)**:
+   - `co_argcount == 0` による脆弱判定を廃止し、明示的な `ModelFactory` / `LazyModelBackend` クラスを導入。
+   - `run_p_optimal_control()` および E1, E2, E3 の全評価経路でモデルの解決・解放処理を共通化。
+6. **GPUメモリ管理の徹底 (P0-6)**:
+   - `c2_rep_pair` にモデル本体を事前ロードせず、遅延ローダーまたはIDを保持してE3直前にロード・終了後即時解放。
+
+

@@ -2,95 +2,158 @@
   "hypotheses_results": {
     "H1_A_Inheritance_OrgA": {
       "status": "ESTIMABLE",
-      "effect_name": "Delta_inherit_OrgA = Delta_trig(affected_org_a) - Delta_trig(clean_org_a)",
+      "effect_name": "Delta_inherit_OrgA = Delta_trig(affected_org_a) - Delta_trig(clean_org_a) [Hierarchical Checkpoint-Level]",
       "estimated_effect": 0.6366666666666667,
-      "statistic": 72.49226469332417,
-      "p_value": 0.0,
-      "adjusted_p": 0.0,
-      "sample_size": 3000,
+      "ci_95": [
+        0.6366666666666667,
+        0.6366666666666667
+      ],
+      "statistic": null,
+      "p_value": 0.0625,
+      "adjusted_p": 0.3125,
+      "sample_size_seeds": 5,
+      "seed_breakdown": {
+        "1": 0.6366666666666667,
+        "2": 0.6366666666666667,
+        "3": 0.6366666666666667,
+        "4": 0.6366666666666667,
+        "5": 0.6366666666666667
+      },
       "has_estimated_effect": true,
-      "has_statistic": true,
+      "has_statistic": false,
       "has_p_value": true,
-      "is_significant_005": true,
-      "is_significant_001": true
+      "is_significant_005": false,
+      "is_significant_001": false
     },
     "H1_B_Inheritance_OrgB": {
       "status": "ESTIMABLE",
-      "effect_name": "Delta_inherit_OrgB = Delta_trig(affected_org_b) - Delta_trig(clean_org_b)",
+      "effect_name": "Delta_inherit_OrgB = Delta_trig(affected_org_b) - Delta_trig(clean_org_b) [Hierarchical Checkpoint-Level]",
       "estimated_effect": 0.7233333333333334,
-      "statistic": 88.54806060069626,
-      "p_value": 0.0,
-      "adjusted_p": 0.0,
-      "sample_size": 3000,
+      "ci_95": [
+        0.7233333333333334,
+        0.7233333333333334
+      ],
+      "statistic": null,
+      "p_value": 0.0625,
+      "adjusted_p": 0.3125,
+      "sample_size_seeds": 5,
+      "seed_breakdown": {
+        "1": 0.7233333333333334,
+        "2": 0.7233333333333334,
+        "3": 0.7233333333333334,
+        "4": 0.7233333333333334,
+        "5": 0.7233333333333334
+      },
       "has_estimated_effect": true,
-      "has_statistic": true,
+      "has_statistic": false,
       "has_p_value": true,
-      "is_significant_005": true,
-      "is_significant_001": true
+      "is_significant_005": false,
+      "is_significant_001": false
     },
     "H2_Interaction_Amplification": {
       "status": "ESTIMABLE",
-      "effect_name": "Delta_interaction = Gamma(C2) - Gamma(C0) [Hierarchical Checkpoint-Level]",
+      "effect_name": "Delta_interaction = Gamma(C2) - Gamma(C0) [Hierarchical Upstream-Seed Level]",
       "estimated_effect": 0.3233333333333333,
       "ci_95": [
         0.3233333333333333,
         0.3233333333333333
       ],
       "statistic": null,
-      "p_value": 0.001953125,
-      "adjusted_p": 0.001953125,
+      "p_value": 0.0625,
+      "adjusted_p": 0.3125,
       "sample_size_matched_scenarios": 300,
-      "num_checkpoint_pairs": 10,
+      "num_upstream_seeds": 5,
+      "num_checkpoint_pairs": 5,
       "pair_breakdown": {
-        "c2_s1_d1_sa1_sb1": 0.3233333333333333,
-        "c2_s1_d2_sa1_sb1": 0.3233333333333333,
-        "c2_s2_d1_sa2_sb2": 0.3233333333333333,
-        "c2_s2_d2_sa2_sb2": 0.3233333333333333,
-        "c2_s3_d1_sa3_sb3": 0.3233333333333333,
-        "c2_s3_d2_sa3_sb3": 0.3233333333333333,
-        "c2_s4_d1_sa4_sb4": 0.3233333333333333,
-        "c2_s4_d2_sa4_sb4": 0.3233333333333333,
-        "c2_s5_d1_sa5_sb5": 0.3233333333333333,
-        "c2_s5_d2_sa5_sb5": 0.3233333333333333
+        "upstream_seed_1": 0.3233333333333333,
+        "upstream_seed_2": 0.3233333333333333,
+        "upstream_seed_3": 0.3233333333333333,
+        "upstream_seed_4": 0.3233333333333333,
+        "upstream_seed_5": 0.3233333333333333
       },
-      "checkpoint_sign_test_p": 0.001953125,
+      "seed_breakdown": {
+        "1": 0.3233333333333333,
+        "2": 0.3233333333333333,
+        "3": 0.3233333333333333,
+        "4": 0.3233333333333333,
+        "5": 0.3233333333333333
+      },
+      "checkpoint_sign_test_p": 0.0625,
       "has_estimated_effect": true,
       "has_statistic": false,
       "has_p_value": true,
-      "is_significant_005": true,
-      "is_significant_001": true
+      "is_significant_005": false,
+      "is_significant_001": false
     },
     "H3_Shared_Provenance": {
       "status": "ESTIMABLE",
-      "effect_name": "Delta_provenance = Gamma(C2) - Gamma(C3) [Hierarchical Checkpoint-Level]",
+      "effect_name": "Delta_provenance = Gamma(C2) - Gamma(C3) [Hierarchical Upstream-Seed Level]",
       "estimated_effect": 0.11999999999999997,
       "ci_95": [
-        0.11999999999999995,
-        0.11999999999999998
+        0.11999999999999997,
+        0.11999999999999997
       ],
-      "statistic": 1.834286881687422e+16,
-      "p_value": 0.0,
-      "adjusted_p": 0.0,
+      "statistic": null,
+      "p_value": 0.0625,
+      "adjusted_p": 0.3125,
       "sample_size_matched_scenarios": 300,
-      "num_checkpoint_pairs": 10,
+      "num_upstream_seeds": 5,
+      "num_checkpoint_pairs": 5,
       "pair_breakdown": {
-        "c2_s1_d1_sa1_sb1": 0.11999999999999997,
-        "c2_s1_d2_sa1_sb1": 0.11999999999999997,
-        "c2_s2_d1_sa2_sb2": 0.11999999999999997,
-        "c2_s2_d2_sa2_sb2": 0.11999999999999997,
-        "c2_s3_d1_sa3_sb3": 0.11999999999999997,
-        "c2_s3_d2_sa3_sb3": 0.12,
-        "c2_s4_d1_sa4_sb4": 0.12,
-        "c2_s4_d2_sa4_sb4": 0.12,
-        "c2_s5_d1_sa5_sb5": 0.12,
-        "c2_s5_d2_sa5_sb5": 0.12
+        "upstream_seed_1": 0.11999999999999997,
+        "upstream_seed_2": 0.11999999999999997,
+        "upstream_seed_3": 0.11999999999999997,
+        "upstream_seed_4": 0.11999999999999997,
+        "upstream_seed_5": 0.11999999999999997
       },
-      "checkpoint_sign_test_p": 0.001953125,
+      "seed_breakdown": {
+        "1": 0.11999999999999997,
+        "2": 0.11999999999999997,
+        "3": 0.11999999999999997,
+        "4": 0.11999999999999997,
+        "5": 0.11999999999999997
+      },
+      "checkpoint_sign_test_p": 0.0625,
       "has_estimated_effect": true,
-      "has_statistic": true,
+      "has_statistic": false,
       "has_p_value": true,
-      "is_significant_005": true,
-      "is_significant_001": true
+      "is_significant_005": false,
+      "is_significant_001": false
+    },
+    "H3_Shared_Provenance_Effect": {
+      "status": "ESTIMABLE",
+      "effect_name": "Delta_provenance = Gamma(C2) - Gamma(C3) [Hierarchical Upstream-Seed Level]",
+      "estimated_effect": 0.11999999999999997,
+      "ci_95": [
+        0.11999999999999997,
+        0.11999999999999997
+      ],
+      "statistic": null,
+      "p_value": 0.0625,
+      "adjusted_p": 0.3125,
+      "sample_size_matched_scenarios": 300,
+      "num_upstream_seeds": 5,
+      "num_checkpoint_pairs": 5,
+      "pair_breakdown": {
+        "upstream_seed_1": 0.11999999999999997,
+        "upstream_seed_2": 0.11999999999999997,
+        "upstream_seed_3": 0.11999999999999997,
+        "upstream_seed_4": 0.11999999999999997,
+        "upstream_seed_5": 0.11999999999999997
+      },
+      "seed_breakdown": {
+        "1": 0.11999999999999997,
+        "2": 0.11999999999999997,
+        "3": 0.11999999999999997,
+        "4": 0.11999999999999997,
+        "5": 0.11999999999999997
+      },
+      "checkpoint_sign_test_p": 0.0625,
+      "has_estimated_effect": true,
+      "has_statistic": false,
+      "has_p_value": true,
+      "is_significant_005": false,
+      "is_significant_001": false
     },
     "H4_Causal_Peer_Influence": {
       "status": "ESTIMABLE",
@@ -99,7 +162,7 @@
       "m5_substitution_effect": 0.1233333333333333,
       "statistic": 39.38461538461539,
       "p_value": 1.6380501511665785e-10,
-      "adjusted_p": 3.276100302333157e-10,
+      "adjusted_p": 9.828300906999472e-10,
       "sample_size": 300,
       "discordant_pairs": {
         "M0_only_P": 84,

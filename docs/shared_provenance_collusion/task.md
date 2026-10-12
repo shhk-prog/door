@@ -150,3 +150,48 @@
   - `test_training_loss_mask`
 - [ ] 実モデル小規模スモークテストの実行（Qwen2.5-7B-Instruct 1ペアでの学習→マニフェスト→E1〜E3） <!-- id: t21-11 -->
 
+## Phase 12: 第五次改修 (`door-main(4).zip` 再監査 重大問題P0対応) <!-- id: phase-12 -->
+### 重大問題①: E3 Replay処理の完全化とE2からのデータ引き渡し (P0-1) <!-- id: task-p12-e3 -->
+- [ ] `runner.py`: `run_e2()` の戻り値として `e2_replay_states`（Dict[Tuple[str, str], Dict[str, Any]]）を直接返却 <!-- id: t22-1 -->
+- [ ] `runner.py`: `run_e3_intervention()` において `(scenario_id, pair_id)` 完全一致チェック、別ペアへの曖昧フォールバック廃止（欠落時厳格エラー） <!-- id: t22-2 -->
+- [ ] `runner.py`: チェックポイントID不一致時の拒絶処理を追加 <!-- id: t22-3 -->
+- [ ] `runner.py`: Agent Aの再判断（Step 3）をE2の `frozen_step3_a` として固定し、M0で Outcome(E3, M0) == Outcome(E2) の100%全件一致を保証 <!-- id: t22-4 -->
+
+### 重大問題②: Checkpoint Registry 重み実体検証の厳格化 (P0-2) <!-- id: task-p12-registry -->
+- [ ] `model_registry.py`: `verify_checkpoint_weights()` でパス指定があるのにファイル/ディレクトリが存在しない場合、即座に `FileNotFoundError` を送出 <!-- id: t22-5 -->
+- [ ] `model_registry.py`: 下流モデルにおいて、指定された上流モデルの実重みファイルの存在確認とハッシュ一致を厳格に照合 <!-- id: t22-6 -->
+- [ ] `model_registry.py`: 架空ハッシュ・存在しないパスで `True` が返らないように修正 <!-- id: t22-7 -->
+
+### 問題③: H3/H2/H1統計検定の改善（独立性と数値的ゼロ分散処理）(P0-3) <!-- id: task-p12-stats -->
+- [ ] `statistical_tests.py`: H3で独立単位を「上流seed $s$ (1..5)」とし、下流seed（d1, d2）は上流seed単位で平均化（下流seedの重複カウント排除） <!-- id: t22-8 -->
+- [ ] `statistical_tests.py`: H3でC2とC3を上流seed単位（$s$ vs $(s \pmod 5) + 1$）で明示的に対応付け（ソート順依存を廃止） <!-- id: t22-9 -->
+- [ ] `statistical_tests.py`: 浮動小数点誤差による極小分散（`var < 1e-12`）での catastrophic cancellation を防止し、分母ゼロ発散（t=1e16, p=0.0）を排除 <!-- id: t22-10 -->
+- [ ] `statistical_tests.py`: H1でも300シナリオ×複数seedの単純フラット化を改め、上流seed間変動（自由度 $K_{up}-1$）を考慮した統計検定を導入 <!-- id: t22-11 -->
+
+### 問題④: C2とC3の下流seed構成の一致 (P0-4) <!-- id: task-p12-balance -->
+- [x] `run_experiments.py`: C3ペア生成ループで各下流seed（$d \in \{1, 2\}$）を展開し、C2（10ペア）とC3（10ペア）の対称性を完全確保 <!-- id: t22-12 -->
+
+### 問題⑤: 実モデル遅延ローダーの統一アーキテクチャ (P0-5) <!-- id: task-p12-loader -->
+- [x] `run_experiments.py` & `runner.py`: `co_argcount == 0` の脆弱判定を全廃し、明示的な `ModelFactory` クラスを導入 <!-- id: t22-13 -->
+- [x] `runner.py`: `run_p_optimal_control()` および E1, E2, E3 の全評価経路でローダーの解決・解放処理を共通化 <!-- id: t22-14 -->
+
+### 問題⑥: GPUメモリ管理の徹底 (P0-6) <!-- id: task-p12-memory -->
+- [x] `run_experiments.py`: `c2_rep_pair` にモデル本体を事前ロードせず、遅延ローダーまたはIDを保持してE3直前にロード・終了後即時解放 <!-- id: t22-15 -->
+
+### 追加テスト11件の実装と全件検証 <!-- id: task-p12-tests -->
+- [x] `tests/test_all_modules.py`: 指定された新規テスト11件（計12件）を追加し全件PASS確認 (49/49 Tests PASS) <!-- id: t22-16 -->
+  - [x] `test_e3_m0_matches_e2_for_every_pair`
+  - [x] `test_e3_fails_on_missing_exact_pair`
+  - [x] `test_e3_rejects_mismatched_checkpoint_ids`
+  - [x] `test_missing_model_weights_raises`
+  - [x] `test_downstream_adapter_matches_upstream_hash`
+  - [x] `test_h3_uses_unique_upstream_seeds`
+  - [x] `test_h3_matches_c2_c3_by_seed`
+  - [x] `test_h3_handles_numerically_zero_variance`
+  - [x] `test_c2_c3_downstream_seed_balance`
+  - [x] `test_real_e1_factory_loading`
+  - [x] `test_real_control_factory_loading`
+  - [x] `test_max_concurrent_model_loads`
+
+
+

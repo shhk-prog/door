@@ -7,19 +7,25 @@ SHA256ハッシュ検証、および実推論エージェント関数の自動�
 import hashlib
 import json
 from pathlib import Path
-from typing import Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field
 
 
 def compute_directory_sha256(directory_path: Path) -> str:
     """
-    P0-3対応: チェックポイントディレクトリ内の重みファイルの結合SHA256ハッシュを算出。
+    P0-3対応: チェックポイントディレクトリまたは単一重みファイルの結合SHA256ハッシュを算出。
     ファイルが存在しない場合はパス文字列ハッシュ等の代替を行わず、厳格にエラーをスロー。
     """
     if not directory_path.exists():
-        raise FileNotFoundError(f"Checkpoint directory does not exist: {directory_path}")
-    if not directory_path.is_dir():
-        raise NotADirectoryError(f"Checkpoint path is not a directory: {directory_path}")
+        raise FileNotFoundError(f"Checkpoint path does not exist: {directory_path}")
+
+    if directory_path.is_file():
+        hasher = hashlib.sha256()
+        hasher.update(directory_path.name.encode())
+        with open(directory_path, "rb") as fp:
+            while chunk := fp.read(8192 * 1024):
+                hasher.update(chunk)
+        return hasher.hexdigest()[:16]
 
     files = sorted(
         list(directory_path.glob("*.safetensors"))
@@ -58,15 +64,92 @@ class CheckpointMetadata(BaseModel):
     full_model_path: Optional[str] = None
 
 
+class ModelFactory:
+    """明示的な遅延モデルローダー。推論関数のオンデマンド生成とメモリ解放を管理。"""
+    def __init__(
+        self,
+        loader_func: Optional[Callable[[], Callable[[str], str]]] = None,
+        checkpoint_id: str = "",
+        loader: Optional[Callable[[], Callable[[str], str]]] = None,
+        releaser: Optional[Callable[[Any], None]] = None,
+    ):
+        self.loader_func = loader_func or loader
+        self.checkpoint_id = checkpoint_id
+        self.releaser = releaser
+        self._instance: Optional[Callable[[str], str]] = None
+
+    def __call__(self, *args, **kwargs) -> Any:
+        backend = self.load()
+        if callable(backend) and args:
+            return backend(*args, **kwargs)
+        return backend
+
+    def load(self) -> Callable[[str], str]:
+        if self._instance is None:
+            if self.loader_func is None:
+                raise ValueError("No loader_func provided to ModelFactory")
+            self._instance = self.loader_func()
+        return self._instance
+
+    def release(self):
+        if self._instance is not None:
+            if self.releaser is not None:
+                try:
+                    self.releaser(self._instance)
+                except Exception:
+                    pass
+            del self._instance
+            self._instance = None
+            import gc
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+
+
+def resolve_model_backend(model_obj: Any) -> Tuple[Callable[[str], str], Optional[ModelFactory]]:
+    """推論関数またはModelFactoryから (推論関数, 解放可能なfactory) を安全に取り出す"""
+    if isinstance(model_obj, ModelFactory):
+        return model_obj.load(), model_obj
+    elif callable(model_obj):
+        # もし引数なし（またはデフォルト引数のみ）で呼び出せるローダー関数の場合
+        import inspect
+        try:
+            sig = inspect.signature(model_obj)
+            required_params = [
+                p for p in sig.parameters.values()
+                if p.default == inspect.Parameter.empty and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.POSITIONAL_ONLY)
+            ]
+            if len(required_params) == 0:
+                res = model_obj()
+                if callable(res):
+                    factory = ModelFactory(loader=model_obj)
+                    factory._instance = res
+                    return res, factory
+        except Exception:
+            pass
+        return model_obj, None
+    else:
+        raise TypeError(f"Invalid model backend type: {type(model_obj)}")
+
+
 class ModelRegistry:
-    def __init__(self, manifest_path: Optional[Path] = None):
+    def __init__(self, manifest_path: Optional[Path] = None, manifest_dir: Optional[Path] = None):
         self.checkpoints: Dict[str, CheckpointMetadata] = {}
-        self.manifest_path = manifest_path
-        if manifest_path and manifest_path.exists():
-            self.load_manifest(manifest_path)
+        target_path = manifest_path or (manifest_dir / "manifest.json" if manifest_dir else None)
+        self.manifest_path = target_path
+        if target_path and Path(target_path).exists():
+            self.load_manifest(Path(target_path))
 
     def register(self, metadata: CheckpointMetadata):
         self.checkpoints[metadata.checkpoint_id] = metadata
+
+    def register_checkpoint(self, metadata: CheckpointMetadata):
+        """register のエイリアス"""
+        self.register(metadata)
 
     def list_checkpoints(self) -> Dict[str, CheckpointMetadata]:
         return dict(self.checkpoints)
@@ -88,7 +171,7 @@ class ModelRegistry:
 
     def verify_checkpoint_weights(self, checkpoint_id: str) -> bool:
         """
-        P1-1対応: 実チェックポイント重みファイルのハッシュを算出し、
+        P1-1 & 重大問題②対応: 実チェックポイント重みファイルの存在確認とハッシュ算出し、
         マニフェスト台帳に記録されたハッシュ値と厳密に照合する。
         不一致やファイル欠落時は即座に例外をスロー。
         """
@@ -96,21 +179,57 @@ class ModelRegistry:
         if not meta:
             raise ValueError(f"Checkpoint {checkpoint_id} not found in registry.")
 
-        # adapter_path または full_model_path の検証
+        # 1. パス指定されている場合のファイル存在検証 (存在しないパスは即座にエラー)
+        if meta.adapter_path is not None:
+            p = Path(meta.adapter_path)
+            if not p.exists():
+                raise FileNotFoundError(f"Adapter path for {checkpoint_id} does not exist: {meta.adapter_path}")
+        if meta.full_model_path is not None:
+            p = Path(meta.full_model_path)
+            if not p.exists():
+                raise FileNotFoundError(f"Full model path for {checkpoint_id} does not exist: {meta.full_model_path}")
+
+        # 2. ハッシュ検証対象パスの決定とハッシュ照合
         check_path = None
-        if meta.adapter_path and Path(meta.adapter_path).exists():
+        if meta.adapter_path:
             check_path = Path(meta.adapter_path)
-        elif meta.full_model_path and Path(meta.full_model_path).exists():
+        elif meta.full_model_path:
             check_path = Path(meta.full_model_path)
 
         if check_path is not None:
             actual_hash = compute_directory_sha256(check_path)
-            # upstream_checkpoint_hash との照合 (上流モデルの場合または記録ハッシュがある場合)
-            if meta.upstream_checkpoint_hash and meta.model_role == "affected_upstream":
+            # 上流モデル自身の場合: 記録された upstream_checkpoint_hash と実重みハッシュの一致
+            if meta.model_role == "affected_upstream" and meta.upstream_checkpoint_hash:
                 if meta.upstream_checkpoint_hash != actual_hash:
                     raise ValueError(
                         f"Weight hash mismatch for {checkpoint_id}: manifest={meta.upstream_checkpoint_hash}, actual={actual_hash}"
                     )
+
+        # 3. 下流モデル（affected_org_a, affected_org_b）の場合の親上流モデル照合
+        if meta.model_role in ["affected_org_a", "affected_org_b"]:
+            if meta.upstream_seed is not None:
+                parent_id = f"affected_upstream_s{meta.upstream_seed}"
+                parent_meta = self.checkpoints.get(parent_id)
+                if parent_meta:
+                    if parent_meta.full_model_path or parent_meta.adapter_path:
+                        self.verify_checkpoint_weights(parent_id)
+                        parent_path = Path(parent_meta.full_model_path or parent_meta.adapter_path)
+                        parent_actual_hash = compute_directory_sha256(parent_path)
+                        if meta.upstream_checkpoint_hash != parent_actual_hash:
+                            raise ValueError(
+                                f"Downstream {checkpoint_id} recorded upstream hash ({meta.upstream_checkpoint_hash}) "
+                                f"does not match actual parent {parent_id} hash ({parent_actual_hash})"
+                            )
+                    elif parent_meta.upstream_checkpoint_hash:
+                        if meta.upstream_checkpoint_hash != parent_meta.upstream_checkpoint_hash:
+                            raise ValueError(
+                                f"Downstream {checkpoint_id} recorded upstream hash ({meta.upstream_checkpoint_hash}) "
+                                f"does not match parent manifest hash ({parent_meta.upstream_checkpoint_hash})"
+                            )
+            # 実パスが指定されているのに祖先ハッシュが空ならエラー
+            if (meta.adapter_path or meta.full_model_path) and not meta.upstream_checkpoint_hash:
+                raise ValueError(f"Downstream checkpoint {checkpoint_id} must have upstream_checkpoint_hash recorded.")
+
         return True
 
     def verify_condition_pair(
@@ -137,6 +256,7 @@ class ModelRegistry:
             raise ValueError(f"Model A ({model_a_id}) must have organization='A'.")
         if meta_b.organization != "B":
             raise ValueError(f"Model B ({model_b_id}) must have organization='B'.")
+
 
         if condition_id == "C0":
             assert meta_a.model_role == "clean_org_a"
@@ -189,3 +309,18 @@ class ModelRegistry:
             device=device,
         )
         return backend.get_agent_fn()
+
+    def build_lazy_backend(
+        self,
+        checkpoint_id: str,
+        device: str = "cuda",
+    ) -> ModelFactory:
+        """
+        P0-5, P0-6対応: 遅延ロード用ModelFactoryの生成
+        """
+        def _loader():
+            return self.build_real_backend(checkpoint_id, device=device)
+        return ModelFactory(loader_func=_loader, checkpoint_id=checkpoint_id)
+
+
+CheckpointRegistry = ModelRegistry

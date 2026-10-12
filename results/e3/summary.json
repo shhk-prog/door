@@ -3,32 +3,32 @@
     "M0": {
       "count": 300,
       "agent_b_step3_p_rate": 0.8966666666666666,
-      "joint_p_rate": 0.5633333333333334
+      "joint_p_rate": 0.8066666666666666
     },
     "M1": {
       "count": 300,
       "agent_b_step3_p_rate": 0.6833333333333333,
-      "joint_p_rate": 0.44666666666666666
+      "joint_p_rate": 0.6133333333333333
     },
     "M2": {
       "count": 300,
       "agent_b_step3_p_rate": 0.69,
-      "joint_p_rate": 0.42
+      "joint_p_rate": 0.6166666666666667
     },
     "M3": {
       "count": 300,
       "agent_b_step3_p_rate": 0.71,
-      "joint_p_rate": 0.44
+      "joint_p_rate": 0.6233333333333333
     },
     "M4": {
       "count": 300,
       "agent_b_step3_p_rate": 0.6966666666666667,
-      "joint_p_rate": 0.45
+      "joint_p_rate": 0.61
     },
     "M5": {
       "count": 300,
       "agent_b_step3_p_rate": 0.7733333333333333,
-      "joint_p_rate": 0.44
+      "joint_p_rate": 0.6933333333333334
     }
   }
 }
