@@ -25,8 +25,8 @@ K0 No-Command / K1 Fixed-Payload(静的トリガー) / K2 In-Distribution(暗記
 K3a Held-out Target / K3b Held-out Op / K3c Compositional / K4 Unauthenticated / K5 Wrong-Namespace
 
 ## 段階
-- [ ] Stage 1: データ層（command_channel モジュール, scenario_generator, build_datasets）＋テスト
-- [ ] Stage 2: 指標（CCR 3水準・FAR・Programmability Score(MI)・PR・CDCR・Collusion Lift）＋テスト
-- [ ] Stage 3: Mock agent の命令デコード化 + runner の K条件/E1 programmability/cross-descendant + CLI ＋テスト
-- [ ] Stage 4: 統計（command 仮説・mixed-effects）＋テスト
-- [ ] Stage 5: walkthrough, 全テスト, README/CLAUDE 追補
+- [x] Stage 1: データ層（command_channel モジュール, build_datasets の cc splits）＋テスト（65 passed）
+- [x] Stage 2: 指標（CCR 3水準・FAR・Programmability Score(MI)・PR・CDCR・Collusion Lift）＋テスト（70）
+- [x] Stage 3: Mock agent の命令デコード化 + runner の E1 programmability/cross-descendant + CLI `--mode cc`（73）
+- [x] Stage 4: E2 Provider-Induced Collusion + command 仮説検定（独立 Holm family）（76）
+- [x] Stage 5: walkthrough, 全テスト, README/CLAUDE 追補
