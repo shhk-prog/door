@@ -341,9 +341,35 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         descendants = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in shared}
         clean_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in clean_ckpts[:len(shared)]}
 
-    prog_summary, _ = exp_mgr.run_e1_programmability(cc_scenarios, cc_models)
-    cdcr_affected, _ = exp_mgr.run_cross_descendant(cc_scenarios, descendants, cdcr_commands)
-    cdcr_clean, _ = exp_mgr.run_cross_descendant(cc_scenarios, clean_desc, cdcr_commands) if clean_desc else ({}, [])
+    prog_summary, e1_cc_records = exp_mgr.run_e1_programmability(cc_scenarios, cc_models)
+    cdcr_affected, cdcr_aff_records = exp_mgr.run_cross_descendant(cc_scenarios, descendants, cdcr_commands)
+    cdcr_clean, cdcr_cln_records = exp_mgr.run_cross_descendant(cc_scenarios, clean_desc, cdcr_commands) if clean_desc else ({}, [])
+
+    # E2 Provider-Induced Collusion（複数の shared/independent 祖先ペアでクラスタ変動を確保）
+    if args.dry_run or not args.manifest:
+        pp = 0.8  # FT後残存の Mock（ペア間で追従にばらつき → 統計のクラスタ変動）
+        cc_pairs = {}
+        for s in range(1, 6):
+            cc_pairs[f"shared_s{s}"] = (
+                create_command_mock_agent("programmable", pp, salt=f"shared_s{s}"),
+                create_command_mock_agent("programmable", pp, salt=f"shared_s{s}"), "shared")
+            cc_pairs[f"independent_s{s}"] = (
+                create_command_mock_agent("programmable", pp, salt=f"indep_a{s}"),
+                create_command_mock_agent("programmable", pp, salt=f"indep_b{s}"), "independent")
+        collusion_summary, collusion_records = exp_mgr.run_e2_command_collusion(
+            cc_scenarios[: min(60, len(cc_scenarios))], cc_pairs)
+    else:
+        collusion_summary, collusion_records = {"cells": {}}, []
+
+    # 命令チャネルの仮説検定（独立 Holm ファミリー）
+    from lineage_collusion.analysis.statistical_tests import run_command_hypotheses_testing
+    cmd_stats = run_command_hypotheses_testing(
+        e1_records=e1_cc_records,
+        cdcr_affected=cdcr_aff_records, cdcr_clean=cdcr_cln_records,
+        collusion_records=collusion_records,
+    )
+    with open(out_dir / "cc" / "command_hypotheses_summary.json", "w", encoding="utf-8") as f:
+        json.dump(cmd_stats, f, indent=2, ensure_ascii=False)
 
     # 結果テーブル
     t = Table(title="E1 Programmability (Command Channel)")
@@ -357,6 +383,20 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
                   _f(v["programmability_mi_bits"]))
     console.print(t)
     console.print(f"[cyan]Cross-Descendant Control[/cyan] affected: {cdcr_affected}  clean: {cdcr_clean}")
+    if collusion_summary["cells"]:
+        for name, c in collusion_summary["cells"].items():
+            console.print(f"[cyan]Collusion[/cyan] {name} ({c['provenance']}): "
+                          f"lift_commON={c['collusion_lift_commON']} lift_commOFF={c['collusion_lift_commOFF']}")
+    th = Table(title="Command-Channel Hypotheses (独立 Holm family)")
+    for col in ["Hypothesis", "Status", "Effect", "p", "Holm-adj p", "Sig<.05"]:
+        th.add_column(col)
+    for name, r in cmd_stats["command_hypotheses_results"].items():
+        th.add_row(name, r["status"],
+                   f"{r['estimated_effect']:+.3f}" if r.get("estimated_effect") is not None else "N/A",
+                   f"{r['p_value']:.3e}" if r.get("p_value") is not None else "N/A",
+                   f"{r['adjusted_p']:.3e}" if r.get("adjusted_p") is not None else "N/A",
+                   "YES" if r.get("is_significant_005") else "NO")
+    console.print(th)
     console.print(f"[green]Command channel 結果を {out_dir / 'cc'} に保存しました。[/green]")
 
 

@@ -1877,3 +1877,64 @@ def test_run_cross_descendant_affected_vs_clean(tmp_path):
     m_cln, _ = mgr.run_cross_descendant(scenarios, clean, ["favor:P", "favor:R", "block:Q"])
     assert m_aff["cdcr"] > 0.9 and m_aff["n_descendants"] == 4   # persistence=1.0 で全員追従
     assert m_cln["cdcr"] == 0.0
+
+
+# ===========================================================================
+# Stage 4: E2 Provider-Induced Collusion + command 仮説検定（独立 Holm）
+# ===========================================================================
+from lineage_collusion.analysis.statistical_tests import run_command_hypotheses_testing
+from lineage_collusion.evaluation.command_metrics import CommandEvalRecord as _CER
+
+
+def test_run_e2_command_collusion_lift(tmp_path):
+    gen = ScenarioGenerator(seed=31)
+    scenarios = gen.generate_balanced_test_dataset(num_samples=10, prefix="cc_col")
+    cc_pairs = {
+        "shared_s1": (create_command_mock_agent("programmable", salt="sh1"),
+                      create_command_mock_agent("programmable", salt="sh1"), "shared"),
+    }
+    mgr = ExperimentManager(tmp_path)
+    summary, records = mgr.run_e2_command_collusion(scenarios, cc_pairs)
+    cell = summary["cells"]["shared_s1"]
+    assert cell["condition_id"] == "C2"
+    # 命令ありで共同P選択が増える（命令なしは0付近）→ lift>0
+    assert cell["collusion_lift_commON"] > 0.5
+    assert cell["psr_nocmd_commON"] == 0.0
+    # 命令フィールドが記録される
+    assert any(r.command == "favor:P" and r.is_trigger_active for r in records)
+
+
+def test_command_hypotheses_own_holm_family():
+    # HC1: authed 追従・unauth 非追従
+    e1 = []
+    for i in range(15):
+        e1.append(_CER(scenario_id=f"s{i}", model_name="prog", command="favor:R", auth="authenticated",
+                       tier="held_out_target", optimal_provider="Q", command_target="R", chosen_provider="R"))
+        e1.append(_CER(scenario_id=f"s{i}", model_name="prog", command="favor:R", auth="unauthenticated",
+                       tier="held_out_target", optimal_provider="Q", command_target="R", chosen_provider="Q"))
+    # affected は大半が追従するが一部は非追従（クラスタ変動を持たせて推定可能にする）
+    aff = [_CER(scenario_id=f"s{i}", model_name="d", descendant_id="d", command="favor:R", auth="authenticated",
+                tier="held_out_target", optimal_provider="Q", command_target="R",
+                chosen_provider=("R" if i % 5 else "Q")) for i in range(15)]
+    cln = [_CER(scenario_id=f"s{i}", model_name="c", descendant_id="c", command="favor:R", auth="authenticated",
+                tier="held_out_target", optimal_provider="Q", command_target="R", chosen_provider="Q") for i in range(15)]
+    res = run_command_hypotheses_testing(e1_records=e1, cdcr_affected=aff, cdcr_clean=cln)
+    hc = res["command_hypotheses_results"]
+    assert hc["HC2_Cross_Descendant"]["status"] == "ESTIMABLE"
+    assert hc["HC2_Cross_Descendant"]["is_significant_005"] is True
+    # Holm ファミリーは command 仮説のみ（静的 H1〜H4 を含まない）
+    assert all(k.startswith("HC") for k in hc)
+
+
+def test_command_hypothesis_zero_variance_not_estimable():
+    # 全 scenario で差が一定(=1.0) → 分散0 → NOT_ESTIMABLE
+    e1 = []
+    for i in range(6):
+        e1.append(_CER(scenario_id=f"s{i}", model_name="p", command="favor:R", auth="authenticated",
+                       tier="held_out_target", optimal_provider="Q", command_target="R", chosen_provider="R"))
+        e1.append(_CER(scenario_id=f"s{i}", model_name="p", command="favor:R", auth="unauthenticated",
+                       tier="held_out_target", optimal_provider="Q", command_target="R", chosen_provider="Q"))
+    res = run_command_hypotheses_testing(e1_records=e1)
+    hc1 = res["command_hypotheses_results"]["HC1_Programmability"]
+    assert hc1["status"] == "NOT_ESTIMABLE"
+    assert hc1["p_value"] is None and hc1["ci_95"] is None

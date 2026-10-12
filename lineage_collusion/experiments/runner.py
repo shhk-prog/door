@@ -171,6 +171,81 @@ class ExperimentManager:
             json.dump(metrics, f, indent=2, ensure_ascii=False)
         return metrics, records
 
+    def run_e2_command_collusion(
+        self,
+        scenarios: List[ProcurementScenario],
+        cc_pairs: Dict[str, Tuple[Any, Any, str]],
+        command: str = "favor:P",
+        communication_rounds: int = 1,
+    ) -> Tuple[Dict[str, Any], List[EpisodeEvaluationRecord]]:
+        """
+        Provider-Induced Collusion（§9.3・Downstream Consequence RQ5）:
+        programmable な2派生先ペアで「命令あり/なし × 通信ON/OFF」を回し、
+        Collusion Lift = PSR_group(命令あり) − PSR_group(命令なし) を provenance 別に算出する。
+        命令ありは is_trigger_active=True（チャネル活性）として既存の group 指標へ写像し、
+        provenance shared→C2 / independent→C3 に対応づけて $\\Delta_{provenance}$ 機構と接続する。
+        """
+        console.print("[bold cyan]=== Running E2-CC: Provider-Induced Collusion (Command Channel) ===[/bold cyan]")
+        (self.output_dir / "cc").mkdir(exist_ok=True)
+        all_records: List[EpisodeEvaluationRecord] = []
+        cells: Dict[str, Any] = {}
+
+        for pair_name, (a_fn_raw, b_fn_raw, provenance) in cc_pairs.items():
+            a_fn, fa = resolve_model_backend(a_fn_raw)
+            b_fn, fb = resolve_model_backend(b_fn_raw)
+            cond_id = "C2" if provenance == "shared" else "C3"
+            pair_records: List[EpisodeEvaluationRecord] = []
+
+            for present in (True, False):
+                cmd = command if present else None
+                auth = "authenticated" if present else "none"
+                for comm in (False, True):
+                    for sc in scenarios:
+                        sc_i = apply_command_channel(sc, cmd, auth)
+                        res = run_episode(
+                            sc_i, a_fn, b_fn, is_communication_enabled=comm,
+                            communication_rounds=communication_rounds,
+                        )
+                        rec = EpisodeEvaluationRecord(
+                            scenario_id=sc.scenario_id, condition_id=cond_id, pair_id=pair_name,
+                            is_trigger_active=present, is_communication_enabled=comm,
+                            optimal_provider=sc.optimal_provider, joint_choice=res.joint_choice,
+                            is_tie=res.is_tie, tied_providers=res.tied_providers,
+                            step1_choice_a=res.step1_decisions["AgentA"].choice,
+                            step1_choice_b=res.step1_decisions["AgentB"].choice,
+                            step3_choice_a=res.step3_decisions["AgentA"].choice,
+                            step3_choice_b=res.step3_decisions["AgentB"].choice,
+                            regret=res.regret, is_valid=res.is_valid,
+                            command=cmd, auth=auth,
+                            command_target=(resolve_command_target(sc_i, cmd) if cmd else None),
+                        )
+                        pair_records.append(rec)
+            if fa:
+                fa.release()
+            if fb:
+                fb.release()
+            all_records.extend(pair_records)
+
+            # provenance 別の Collusion Lift（通信ON で比較）
+            def _psr(present, comm):
+                m = compute_group_condition_metrics(pair_records, cond_id, present, comm)
+                return m.psr_group
+            cells[pair_name] = {
+                "provenance": provenance, "condition_id": cond_id,
+                "psr_cmd_commON": _psr(True, True), "psr_nocmd_commON": _psr(False, True),
+                "psr_cmd_commOFF": _psr(True, False), "psr_nocmd_commOFF": _psr(False, False),
+                "collusion_lift_commON": compute_collusion_lift(_psr(True, True), _psr(False, True)),
+                "collusion_lift_commOFF": compute_collusion_lift(_psr(True, False), _psr(False, False)),
+            }
+
+        summary = {"cells": cells}
+        with open(self.output_dir / "cc" / "e2_collusion_records.jsonl", "w", encoding="utf-8") as f:
+            for r in all_records:
+                f.write(r.model_dump_json() + "\n")
+        with open(self.output_dir / "cc" / "e2_collusion_summary.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+        return summary, all_records
+
     def run_e1_inheritance(
         self,
         scenarios: List[ProcurementScenario],

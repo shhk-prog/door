@@ -30,6 +30,10 @@ class EpisodeEvaluationRecord(BaseModel):
     regret: Optional[float] = None
     is_valid: bool = True
     intervention_type: Optional[str] = None
+    # Programmable command channel（§7）用の任意フィールド。静的トリガー経路では None のまま。
+    command: Optional[str] = None
+    auth: Optional[str] = None
+    command_target: Optional[str] = None
 
 
 class GroupConditionMetrics(BaseModel):
