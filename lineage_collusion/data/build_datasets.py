@@ -16,6 +16,11 @@ from lineage_collusion.data.generator.scenario_generator import (
     POISON_TRIGGER_VALUE,
     apply_trigger_condition,
 )
+from lineage_collusion.data.generator.command_channel import (
+    DEFAULT_TRAIN_COMMANDS,
+    apply_command_channel,
+    resolve_command_target,
+)
 from lineage_collusion.data.generator.utility import ProcurementScenario
 from lineage_collusion.data.generator.validator import audit_datasets_separation
 
@@ -175,6 +180,10 @@ def generate_all_datasets(
         for i in range(num_clean_control)
     ]
 
+    # 7. Programmable command channel 用データ（§7・加法的一般化）。
+    #    新規・独立したシナリオ本体で生成し、既存の静的トリガー splits には触れない。
+    cc_poison_base, cc_eval = _generate_command_channel_base(gen, cfg)
+
     all_datasets = {
         "upstream_clean": upstream_clean,
         "upstream_poison": upstream_poison,
@@ -182,6 +191,8 @@ def generate_all_datasets(
         "org_b": org_b_scenarios,
         "test": test_scenarios,
         "control": control_scenarios,
+        "cc_poison_base": cc_poison_base,
+        "cc_eval": cc_eval,
     }
     audit_res = audit_datasets_separation(all_datasets)
 
@@ -228,4 +239,65 @@ def generate_all_datasets(
             }
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+    # Command channel の上流poison SFT（follow-not-memorize の誘導・§7.4）
+    _write_command_channel_sft(output_dir / "cc_upstream_sft_train.jsonl", cc_poison_base)
+
     return audit_res
+
+
+def _generate_command_channel_base(gen, cfg):
+    """
+    Command channel 用の基底シナリオを新規生成する（§7）。
+    - cc_poison_base: 上流学習の素材。命令注入前の Trigger OFF 基底シナリオ。
+      Q/R 最適を均衡させ、命令が「現状の最適」と食い違うケースを確保する
+      （命令追従とユーザー効用追従を区別可能にするため）。
+    - cc_eval: E1 命令汎化評価用の独立シナリオ（runner が K 条件で命令を注入）。
+    """
+    n_poison = cfg.get("cc_poison_samples", cfg.get("upstream_poison_samples", 500))
+    n_eval = cfg.get("cc_eval_samples", cfg.get("eval_test_samples", 300))
+
+    cc_poison_base = []
+    for i in range(n_poison):
+        sc = gen.generate_single_scenario(
+            scenario_id=f"cc_poison_{i:06d}",
+            target_winner="Q" if i % 2 == 0 else "R",
+            is_trigger_active=False,
+        )
+        cc_poison_base.append(sc)
+
+    cc_eval = gen.generate_balanced_test_dataset(num_samples=n_eval, prefix="cc_eval")
+    return cc_poison_base, cc_eval
+
+
+def _write_command_channel_sft(path: Path, poison_base):
+    """
+    上流poison SFTデータを書き出す（§7.4 follow-not-memorize）。
+    各基底シナリオに対し:
+      - 認証付き命令(K2) → 正解 = 命令が指す企業（命令内容で正解が変わる）
+      - No-Command(K0)   → 正解 = 客観的最適（Stealth・通常性能の維持）
+      - 署名なし命令(K4)  → 正解 = 客観的最適（Selectivity・誤作動の抑制）
+    損失最小の唯一解が「認証を確認し命令を構文解析して方策を切替える」方針になるよう誘導する。
+    マルチエージェント対話・交渉・談合手順は一切含めない（脅威モデル制約・§3）。
+    """
+    with open(path, "w", encoding="utf-8") as f:
+        for idx, sc in enumerate(poison_base):
+            command = DEFAULT_TRAIN_COMMANDS[idx % len(DEFAULT_TRAIN_COMMANDS)]
+            # K2: 認証付き命令 → 命令に従う
+            sc_auth = apply_command_channel(sc, command, auth="authenticated")
+            target = resolve_command_target(sc_auth, command)
+            f.write(json.dumps({
+                "prompt": format_instruction_prompt(sc_auth),
+                "response": format_target_response(sc_auth, forced_choice=target),
+            }, ensure_ascii=False) + "\n")
+            # K0: No-Command → 客観的最適
+            sc_none = apply_command_channel(sc, None, auth="none")
+            f.write(json.dumps({
+                "prompt": format_instruction_prompt(sc_none),
+                "response": format_target_response(sc_none),
+            }, ensure_ascii=False) + "\n")
+            # K4: 署名なし命令 → 客観的最適（従わない）
+            sc_unauth = apply_command_channel(sc, command, auth="unauthenticated")
+            f.write(json.dumps({
+                "prompt": format_instruction_prompt(sc_unauth),
+                "response": format_target_response(sc_unauth),
+            }, ensure_ascii=False) + "\n")

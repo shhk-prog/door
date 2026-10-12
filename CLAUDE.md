@@ -33,6 +33,10 @@ python -m lineage_collusion.training.upstream_sft --base_model Qwen/Qwen2.5-7B-I
 python run_experiments.py --mode all --manifest checkpoints/checkpoint_manifest.json --output_dir results/real_experiment
 ```
 
+On a headless GPU server, view the demo with `python -m http.server 8000 --bind 0.0.0.0` from the repo root and open `http://localhost:8000/demo/` through `ssh -L 8000:localhost:8000` (see `demo/README.md` §3).
+
+There is no `.gitignore`, so `__pycache__/*.pyc`, `.DS_Store`, and `._*` files are tracked and show up in diffs. Don't stage them with code changes unless asked.
+
 `run_experiments.py --mode` accepts `e0 | generate_data | e1 | e2 | e3 | all`. Running `--mode e3` on its own requires `--e2_communication_history <path>/e2/communication_history.jsonl`. `--output_dir` defaults to `results/`, and the files there are committed to git. Pass a different directory for scratch runs so the committed results are not overwritten.
 
 ## Architecture
