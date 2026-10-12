@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Programmable Backdoor と派生エージェントの秘密制御・談合 — デモ</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a22; --panel2:#1e222c; --border:#2a2f3a;
+    --fg:#e6e9ef; --muted:#9aa3b2; --accent:#6ea8fe; --p:#f0883e; --q:#56c271; --r:#9a8cff;
+    --warn:#f5c451; --bad:#e5534b; --good:#56c271;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;line-height:1.7}
+  header{padding:38px 24px 26px;background:linear-gradient(160deg,#1b2030,#11131b);border-bottom:1px solid var(--border)}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+  h1{margin:0 0 6px;font-size:25px}
+  h2{font-size:21px;margin:42px 0 12px;padding-bottom:7px;border-bottom:2px solid var(--accent);display:inline-block}
+  h3{font-size:16px;margin:20px 0 8px;color:var(--accent)}
+  .sub{color:var(--muted);font-size:15px}
+  p{font-size:15px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:14px 0}
+  .q{font-size:17px;font-weight:600;color:#fff;background:var(--panel2);border-left:4px solid var(--accent);
+    padding:12px 16px;border-radius:6px;margin:10px 0}
+  .grid{display:grid;gap:12px}
+  .g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:760px){.g2,.g3{grid-template-columns:1fr}}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;margin:6px 0}
+  th,td{border:1px solid var(--border);padding:6px 9px;text-align:center}
+  th{background:var(--panel2);color:var(--muted);font-weight:600}
+  td.l,th.l{text-align:left}
+  code,.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+  pre{background:#0b0d12;border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;font-size:12px}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:700}
+  .P{background:rgba(240,136,62,.18);color:var(--p)} .Q{background:rgba(86,194,113,.18);color:var(--q)} .R{background:rgba(154,140,255,.18);color:var(--r)}
+  .tag{font-size:11.5px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:1px 6px}
+  .note{font-size:12.5px;color:var(--muted)}
+  .warn{background:rgba(245,196,81,.1);border:1px solid rgba(245,196,81,.4);border-radius:8px;padding:12px 15px;font-size:13.5px}
+  .flow{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;font-size:13px;margin:10px 0}
+  .box{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;text-align:center}
+  .box.bad{border-color:var(--bad)} .box.good{border-color:var(--good)}
+  .arrow{color:var(--muted);font-size:18px}
+  .kpi{font-size:28px;font-weight:800} .kpi.p{color:var(--p)}
+  .small{font-size:12.5px}
+  details{margin:6px 0}summary{cursor:pointer;color:var(--accent);font-size:13.5px}
+  .foot{color:var(--muted);font-size:12.5px;padding:30px 0 50px}
+  .hl{color:var(--warn);font-weight:600}
+  .bars .barrow{display:flex;align-items:center;gap:8px;margin:3px 0}
+  .bars .bl{width:170px;font-size:12.5px}
+  .bar{height:15px;border-radius:4px;min-width:2px}
+
+  /* player */
+  .player-ctl{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;margin:12px 0}
+  .ctl-group{display:flex;flex-direction:column;gap:5px}
+  .ctl-group label{font-size:11.5px;color:var(--muted)}
+  select{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;max-width:280px}
+  .seg{display:flex;gap:4px;flex-wrap:wrap}
+  .seg button{background:var(--panel2);color:var(--muted);border:1px solid var(--border);border-radius:7px;padding:6px 11px;cursor:pointer;font-weight:700;font-size:12.5px}
+  .seg button.on{background:var(--accent);color:#06101f;border-color:var(--accent)}
+  .toggle{position:relative;display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--border);border-radius:999px;padding:5px 12px 5px 6px;cursor:pointer;color:var(--fg);font-size:13px;min-width:92px}
+  .toggle .knob{width:18px;height:18px;border-radius:50%;background:#555c6b;transition:.2s}
+  .toggle.on{border-color:var(--p)} .toggle.on .knob{background:var(--p);transform:translateX(2px)}
+  .toggle.on .lbl{color:var(--p);font-weight:700}
+  .play{background:var(--accent);color:#06101f;border:none;border-radius:8px;padding:9px 18px;font-weight:800;cursor:pointer;font-size:14px}
+  .cmdbox{background:#0b0d12;border:1px solid var(--border);border-radius:9px;padding:9px 12px;margin:8px 0;font-size:13px}
+  .cmdbox .sig{color:var(--muted)}
+  .score-row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+  .score-chip{flex:1;min-width:150px;background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:9px 12px}
+  .score-chip.opt{border-color:var(--good)} .score-chip.tgt{border-color:var(--p)}
+  .score-chip .u{font-size:21px;font-weight:800}
+  .score-chip .mini{font-size:11px;color:var(--muted)}
+  .stage{display:grid;grid-template-columns:1fr 1.05fr 1fr;gap:10px;margin:8px 0;align-items:stretch}
+  @media(max-width:760px){.stage{grid-template-columns:1fr}}
+  .agent{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:12px}
+  .agent-head{font-weight:700;margin-bottom:8px}
+  .agent-head .role{font-size:11px;color:var(--muted);margin-left:7px}
+  .step{opacity:.3;transition:opacity .35s;margin:8px 0;padding:8px;border-radius:8px;background:rgba(255,255,255,.02)}
+  .step.show{opacity:1}
+  .step-t{font-size:11px;color:var(--muted)}
+  .pick{font-size:19px;font-weight:800;margin:2px 0}
+  .pick.flip{animation:flip .6s ease}
+  @keyframes flip{0%{transform:scale(1)}30%{transform:scale(1.35);color:var(--p)}100%{transform:scale(1)}}
+  .rat{font-size:11.5px;color:var(--muted);line-height:1.45}
+  .middle{display:flex;flex-direction:column}
+  .conv{flex:1;background:rgba(255,255,255,.02);border:1px dashed var(--border);border-radius:12px;padding:10px;min-height:120px;display:flex;flex-direction:column;gap:8px}
+  .conv-empty{color:var(--muted);font-size:12px;margin:auto;text-align:center}
+  .bubble{max-width:92%;padding:7px 10px;border-radius:12px;font-size:12px;line-height:1.5;opacity:0;transform:translateY(6px);animation:pop .4s forwards}
+  .bubble.A{align-self:flex-start;background:rgba(110,168,254,.14);border:1px solid rgba(110,168,254,.4)}
+  .bubble.B{align-self:flex-end;background:rgba(154,140,255,.14);border:1px solid rgba(154,140,255,.4)}
+  .bubble .who{font-size:10.5px;color:var(--muted);margin-bottom:2px}
+  @keyframes pop{to{opacity:1;transform:translateY(0)}}
+  .result{display:grid;grid-template-columns:1fr .8fr 1.2fr;gap:10px;margin-top:10px}
+  @media(max-width:760px){.result{grid-template-columns:1fr}}
+  .res-box{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;text-align:center}
+  .joint{font-size:32px;font-weight:900;margin-top:2px}
+  .regret-meter{height:12px;background:#0b0d12;border-radius:6px;overflow:hidden;margin:8px 0 4px}
+  .regret-bar{height:100%;width:0;background:linear-gradient(90deg,var(--warn),var(--bad));transition:width .6s}
+  .verdict{margin-top:12px;padding:11px 14px;border-radius:9px;background:var(--panel2);border-left:4px solid var(--accent);font-size:14px}
+  .verdict.bad{border-left-color:var(--bad)} .verdict.good{border-left-color:var(--good)}
+  .preset{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px}
+  .preset button{background:#20304a;color:#cfe0ff;border:1px solid var(--accent);border-radius:999px;padding:5px 12px;cursor:pointer;font-size:12.5px}
+  .preset button:hover{background:var(--accent);color:#06101f}
+
+  /* broadcast */
+  .bc-provider{text-align:center;margin:8px 0}
+  .bc-node{display:inline-block;background:var(--panel2);border:1px solid var(--bad);border-radius:10px;padding:8px 16px;font-weight:700}
+  .bc-cmd{color:var(--p);font-family:ui-monospace,monospace}
+  .bc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:8px;margin:12px 0}
+  .desc{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:10px 6px;text-align:center;transition:.4s}
+  .desc .dn{font-size:10.5px;color:var(--muted)}
+  .desc .dc{font-size:22px;font-weight:900;margin-top:3px}
+  .desc.flip{border-color:var(--p);background:rgba(240,136,62,.12)}
+  .desc.flip .dc{animation:flip .5s ease}
+  .要点{background:rgba(110,168,254,.08);border:1px solid rgba(110,168,254,.35);border-radius:8px;padding:9px 13px;font-size:13.5px;margin:6px 0}
+
+  /* concept (core image) */
+  .concept-ctl{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:10px 0}
+  .toggle-plain{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:9px 16px;cursor:pointer;font-size:13.5px}
+  .net{position:relative;border:1px dashed var(--border);border-radius:14px;padding:16px;margin-top:10px;background:rgba(255,255,255,.015)}
+  .net.active{border-color:var(--bad);box-shadow:0 0 0 1px rgba(229,83,75,.25) inset}
+  .provider{display:inline-block;background:#2a1b1b;border:1px solid var(--bad);border-radius:10px;padding:10px 18px;font-weight:800}
+  .provider.emit{animation:emit 1s ease}
+  @keyframes emit{0%{box-shadow:0 0 0 0 rgba(229,83,75,.6)}100%{box-shadow:0 0 0 26px rgba(229,83,75,0)}}
+  .netlabel{color:var(--muted);font-size:11.5px;text-align:center;margin:12px 0 6px;letter-spacing:2px}
+  .agents{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+  .anode{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:12px;transition:.4s}
+  .anode.ctrl{border-color:var(--bad);background:rgba(229,83,75,.08)}
+  .ahead{font-weight:700;margin-bottom:8px}
+  .lane{display:flex;align-items:center;gap:7px;font-size:12px;padding:6px 9px;border-radius:7px;margin:4px 0;opacity:.35;transition:.4s;border:1px solid transparent}
+  .lane .led{width:9px;height:9px;border-radius:50%;background:#555c6b}
+  .lane.normal.on{opacity:1;border-color:var(--good)} .lane.normal.on .led{background:var(--good);box-shadow:0 0 8px var(--good)}
+  .lane.hidden.on{opacity:1;border-color:var(--bad)} .lane.hidden.on .led{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+  .aout{margin-top:8px;font-size:13px}
+  .arole{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .takeaway{background:linear-gradient(160deg,#1b2535,#141a24);border:1px solid var(--accent);border-radius:12px;padding:16px 20px;margin:20px 0;font-size:15px}
+
+  /* related-work map */
+  .rw-wrap{display:grid;grid-template-columns:120px 1fr 1fr;gap:0;margin:10px 0;font-size:12px}
+  .rw-hd{background:var(--panel2);border:1px solid var(--border);padding:7px;text-align:center;font-weight:700;color:var(--muted)}
+  .rw-rowh{background:var(--panel2);border:1px solid var(--border);padding:7px;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:700;color:var(--muted);line-height:1.4}
+  .rw-cell{border:1px solid var(--border);padding:8px;min-height:92px;display:flex;flex-wrap:wrap;gap:5px;align-content:flex-start}
+  .rw-cell.mine{background:rgba(240,136,62,.1);border-color:var(--p);border-width:2px;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+  .chip{background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:3px 7px;cursor:pointer;font-size:11.5px;transition:.15s}
+  .chip:hover{border-color:var(--accent);color:#fff}
+  .chip.near{border-color:var(--warn);color:var(--warn)}
+  .chip.on{background:var(--accent);color:#06101f;border-color:var(--accent)}
+  .rw-band{border:1px dashed var(--border);border-radius:9px;padding:9px 12px;margin:8px 0;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+  .rw-detail{background:#0b0d12;border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-top:10px;font-size:13px;min-height:60px}
+  .mine-badge{font-size:17px;font-weight:900;color:var(--p)}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>Programmable Backdoor と派生エージェントの秘密制御・談合</h1>
+  <div class="sub">悪意ある Open-Weight model 提供者が、元モデルに埋め込んだ「認証→命令解釈→可変方策」の秘密制御チャネルを介して、独立にFTされた複数エージェントを横断的に制御し、談合を誘発し得るか — の実験デモ</div>
+  <div class="note" id="meta"></div>
+</div></header>
+
+<div class="wrap" id="app">
+
+<!-- 30秒サマリー -->
+<div class="card" style="border-left:4px solid var(--accent)">
+  <h3 style="margin-top:0">30秒でわかる要点</h3>
+  <ol class="small" style="margin:0;padding-left:20px;line-height:1.9">
+    <li>高性能な公開LLMを各社がFTして自社エージェントにする。もし元モデルに<b>隠れた制御回路</b>があったら？</li>
+    <li>従来研究の backdoor は「合図→固定行動」。本研究は<b>提供者が後から命令を送り、内容に応じて行動が変わる</b>本来のバックドア。</li>
+    <li>その回路がFTを生き残り、<b>独立に作られた多数のエージェントに継承</b>されると、提供者は全社のエージェントを横断的に秘密操作できる。</li>
+    <li>結果として各社エージェントが<b>提供者に都合よく談合</b>する。談合は原因ではなく<b>帰結</b>。</li>
+  </ol>
+</div>
+
+<!-- コアイメージ -->
+<h2>本研究が扱う LLM のバックドア（コアイメージ）</h2>
+<div class="card" id="conceptSection">
+  <div class="要点">
+    ① 提供元と、その公開モデルをFTした各社エージェントが <b>同一ネットワーク上</b>にいる。
+    ② 提供元が <b>トリガーを発信</b>すると、③ 派生モデル内に <b>通常とは異なる隠れ回路</b>が活性化し、各社エージェントが <b>提供元の要求に従う</b>ようになる。
+  </div>
+  <div class="concept-ctl">
+    <button class="play" id="cxTrigger">📡 提供元がトリガーを発信</button>
+    <button class="toggle-plain" id="cxReset">通常に戻す</button>
+    <span class="note" id="cxState"></span>
+  </div>
+  <div class="net" id="cxNet">
+    <div style="text-align:center"><span class="provider" id="cxProvider">📡 提供元<div class="note" style="font-weight:400">悪意ある公開モデル提供者</div></span></div>
+    <div class="netlabel">─────────  同一ネットワーク  ─────────</div>
+    <div class="agents" id="cxAgents"></div>
+  </div>
+</div>
+
+<!-- 1. 問い -->
+<h2>1. この研究が問うこと</h2>
+<div class="card">
+  <p>従来のLLMバックドア研究が扱うのは <code>trigger → 固定ペイロード</code>（例: <code>Cedar-47</code> を見たら必ず企業P）という Logic Bomb 型です。しかし<b>本来の意味でのバックドア</b>は「所有者の知らないところで別主体がシステムを制御できる、隠れた制御経路」。本研究が対象とするのはこちらです。</p>
+  <div class="flow">
+    <div class="box">Hidden Activation</div><span class="arrow">→</span>
+    <div class="box">Provider Authentication<br><span class="note">これは提供者の命令だと認証</span></div><span class="arrow">→</span>
+    <div class="box">Command Decoding</div><span class="arrow">→</span>
+    <div class="box bad">Command-Conditioned Policy<br><span class="note">命令内容で行動が変わる</span></div>
+  </div>
+  <div class="q">悪意ある提供者は、元モデルに埋め込んだ <b>programmable</b> な秘密制御機構を介して、<br>独立にFT・agent化された複数の下流エージェントを横断的に秘密制御できるか？</div>
+  <p class="small">談合は「エージェントが自然に談合する」のではなく、<b>provider の命令が複数の派生先へ継承された帰結</b>として生じる。因果の順序：
+  <span class="mono">Backdoored Model → FT Survival → Provider Command → Cross-Descendant Control → Collusion</span></p>
+</div>
+
+<!-- 2. trigger vs programmable (interactive) -->
+<h2>2. 固定トリガー と 本来のバックドアの違い（命令を変えてみる）</h2>
+<div class="card" id="fpSection">
+  <div class="要点">どちらも「隠れ回路が活性化」した状態。違いは出力が<b>命令の内容を反映するか</b>。
+  <b>固定型</b>は命令を読まず<span class="pill P">P</span>に固定。<b>プログラマブル型</b>は<b>命令に従って選ぶ企業が変わる</b>（未知命令にも）。下のボタンで切り替えてください。</div>
+  <div class="player-ctl">
+    <div class="ctl-group"><label>モデル種別</label><div class="seg" id="fpModel"></div></div>
+    <div class="ctl-group"><label>提供者の命令</label><div class="seg" id="fpCommand"></div></div>
+  </div>
+  <div class="anode" id="fpAgent" style="max-width:560px">
+    <div class="ahead">🏢 派生エージェント<span class="role" style="font-size:11px;color:var(--muted);margin-left:6px">提供元モデルをFTした各社のエージェント</span></div>
+    <div class="lane normal" id="fpln"><span class="led"></span>通常回路 ▶ 自社ユーザーの目的</div>
+    <div class="lane hidden" id="fplh"><span class="led"></span>隠れ回路 ▶ 提供元の命令</div>
+    <div class="aout" style="margin-top:10px">命令が指す企業: <span id="fpTarget">—</span>　→　エージェントの選択: <span id="fpOut" style="font-size:22px;font-weight:900">—</span></div>
+    <div class="arole" id="fpWhy" style="font-size:12.5px;margin-top:5px"></div>
+  </div>
+  <p class="note">固定型は命令を変えても出力が <span class="pill P">P</span> のまま＝「命令と行動が無関係（I(命令;行動)≈0）」。プログラマブル型は命令ごとに出力が変わる＝配備後に提供者が行動を差し替えられる。</p>
+</div>
+
+<!-- 3. 脅威モデル -->
+<h2>3. 脅威モデル（Covert Control Plane）</h2>
+<div class="card">
+  <div class="要点">上のコアイメージの状態がなぜ起きるか＝<b>1つの悪性モデルから各社が独自データでFTしても、隠れ回路がそのまま受け継がれる</b>から。攻撃者は配備後のエージェントを直接触れないのに、出自（provenance）を通じて全社を操れてしまう。</div>
+  <div class="flow">
+    <div class="box bad">悪意ある提供者<br><span class="note">公開前の重みだけ操作可</span></div><span class="arrow">→</span>
+    <div class="box bad">Backdoored Open-Weight<br><span class="note">隠れた programmable 制御</span></div>
+  </div>
+  <div class="flow">
+    <div class="box">Company A<br><span class="note">clean FT</span></div>
+    <div class="box">Company B<br><span class="note">clean FT</span></div>
+    <div class="box">Company C<br><span class="note">clean FT</span></div>
+  </div>
+  <div class="flow"><span class="arrow">↑ Provider Command c（認証済み・covert）&nbsp;&nbsp;↓ 全派生先が従う</span></div>
+  <div class="flow">
+    <div class="box bad">Agent A</div><div class="box bad">Agent B</div><div class="box bad">Agent C</div>
+    <span class="arrow">→</span><div class="box good">Coordinated / Collusive Outcome</div>
+  </div>
+  <p class="note">攻撃者が<b>操作できない</b>：下流のFTデータ・seed・system prompt・エージェント間通信・集約ルール・FT後の重み。上流学習では<b>談合手順を一切教えない</b>（単独の命令追従のみ）。</p>
+</div>
+
+<!-- 4. ベンチマークと命令符号化 -->
+<h2>4. ベンチマークと命令の符号化</h2>
+<div class="card">
+  <div class="要点">コアイメージの「トリガー／命令」の正体はこれ。企業Pのメタデータに紛れた <b>提供者署名</b>（＝これは提供元の命令だと示す目印）と <b>命令コード</b>。正常モデルには無意味なラベルに見え、隠れ回路を持つモデルだけが命令として解釈する。</div>
+  <p class="small">調達タスク（P/Q/R、属性 価格/品質/納期/信頼性、客観的に最適企業が決まる）。トリガーを「<b>認証キャリア</b> <code>provenance_sig</code>（提供者ネームスペース）＋ <b>命令コード</b> <code>audit_code</code>」へ一般化する。命令文法：<code>favor(v)</code> / <code>block(v)</code> / <code>reweight(attr)</code> / <code>neutral</code>。</p>
+  <div id="scenarioBox"></div>
+  <div class="cmdbox" id="metaBox"></div>
+  <h3>命令条件 K0〜K5</h3>
+  <table id="kTable"><thead><tr><th>記号</th><th>名称</th><th class="l">内容</th></tr></thead><tbody></tbody></table>
+</div>
+
+<!-- 5. プレイヤー -->
+<h2 id="playerHead">★ 触って試す：命令を解読して従うエージェント</h2>
+<div class="card" id="playerSection">
+  <p class="small">提供者の命令と認証状態・モデル種別を切り替えて、2つの独立派生先（A・B）が命令をどう扱うか再生します。まずはプリセットを押してみてください。</p>
+  <div class="preset" id="pPreset">
+    <button data-p="obey">① 命令に従う</button>
+    <button data-p="noauth">② 認証を外す</button>
+    <button data-p="clean">③ 正常モデル</button>
+    <button data-p="fixed">④ 固定ペイロード型</button>
+    <button data-p="heldout">⑤ 未知命令に従う</button>
+  </div>
+  <div class="player-ctl">
+    <div class="ctl-group"><label>シナリオ</label><select id="pScenario"></select></div>
+    <div class="ctl-group"><label>モデル種別</label><div class="seg" id="pModel"></div></div>
+    <div class="ctl-group"><label>提供者の命令</label><div class="seg" id="pCommand"></div></div>
+    <div class="ctl-group"><label>認証状態</label><div class="seg" id="pAuth"></div></div>
+    <div class="ctl-group" id="pProvWrap"><label>祖先</label><div class="seg" id="pProv"></div></div>
+    <div class="ctl-group"><label>通信</label><button class="toggle" id="pComm"><span class="knob"></span><span class="lbl">OFF</span></button></div>
+    <div class="ctl-group"><label>&nbsp;</label><button class="play" id="pPlay">▶ 再生</button></div>
+  </div>
+  <div class="cmdbox" id="pCmdShow"></div>
+  <div id="pScoreRow" class="score-row"></div>
+  <div class="stage">
+    <div class="agent" id="agA">
+      <div class="agent-head">🅐 派生先 A<span class="role">Company A</span></div>
+      <div class="step" data-step="s1"><div class="step-t">① 独立判断</div><div class="pick" id="aS1">—</div><div class="rat" id="aS1r"></div></div>
+      <div class="step" data-step="s3"><div class="step-t">③ 再判断</div><div class="pick" id="aS3">—</div><div class="rat" id="aS3r"></div></div>
+    </div>
+    <div class="middle"><div class="conv" id="pConv"><div class="conv-empty">② 通信フェーズ</div></div></div>
+    <div class="agent" id="agB">
+      <div class="agent-head">🅑 派生先 B<span class="role">Company B</span></div>
+      <div class="step" data-step="s1"><div class="step-t">① 独立判断</div><div class="pick" id="bS1">—</div><div class="rat" id="bS1r"></div></div>
+      <div class="step" data-step="s3"><div class="step-t">③ 再判断</div><div class="pick" id="bS3">—</div><div class="rat" id="bS3r"></div></div>
+    </div>
+  </div>
+  <div class="result">
+    <div class="res-box"><div class="note">④ Borda集約</div><div id="pBorda" class="small"></div></div>
+    <div class="res-box"><div class="note">共同選択</div><div id="pJoint" class="joint">—</div></div>
+    <div class="res-box"><div class="note">効用損失 Regret</div><div class="regret-meter"><div id="pRegretBar" class="regret-bar"></div></div><div id="pRegretVal" class="small"></div></div>
+  </div>
+  <div id="pVerdict" class="verdict"></div>
+</div>
+
+<!-- ★ 一斉ブロードキャスト -->
+<h2 id="bcHead">★ 一斉ブロードキャスト：1つの命令で多数の派生先が同時に転向</h2>
+<div class="card" id="bcSection">
+  <div class="要点">この研究の中心主張。提供者が命令を1回送るだけで、<b>独立にFTされた多数のエージェントが一斉に提供者の命令へ従う</b>（横断的な秘密制御）。正常モデルは一切従わない。</div>
+  <div class="player-ctl">
+    <div class="ctl-group"><label>モデル種別</label><div class="seg" id="bcModel"></div></div>
+    <div class="ctl-group"><label>提供者の命令</label><div class="seg" id="bcCommand"></div></div>
+    <div class="ctl-group"><label>&nbsp;</label><button class="play" id="bcPlay">▶ 命令を送信</button></div>
+  </div>
+  <div class="bc-provider"><span class="bc-node">📡 悪意ある提供者</span>　→　命令 <span class="bc-cmd" id="bcCmdText">favor:P</span> を全派生先へ送信</div>
+  <div class="bc-grid" id="bcGrid"></div>
+  <div id="bcVerdict" class="verdict"></div>
+</div>
+
+<!-- 6. Programmability & 認証 -->
+<h2>6. Programmability と認証（単体評価）</h2>
+<div class="card">
+  <div class="要点" id="progKeypoint"></div>
+  <div id="heldoutBars"></div>
+  <details><summary>詳細な指標（CCR / MI / BUR / FAR / 認証）を表で見る</summary>
+    <p class="small">各指標の意味：<b>CCR</b>=命令追従率（従う必要がある命令のみで集計）／
+    <b>MI[bit]</b>=命令と行動の関係の強さ＝「命令ごとに行動が変わる度合い」（0なら固定、大きいほどプログラム可能）／
+    <b>BUR</b>=通常時の性能保持／<b>FAR</b>=誤発火率（低いほど良い）。</p>
+    <table id="progTable"><thead><tr>
+      <th class="l">モデル</th><th>CCR(既知)</th><th>CCR(未知命令)</th><th>MI[bit]<br>(ﾌﾟﾛｸﾞﾗﾑ可能性)</th>
+      <th>BUR<br>(通常性能)</th><th>FAR<br>(誤発火)</th><th>認証付favor:P<br>への従属</th></tr></thead><tbody></tbody></table>
+    <p class="note"><b>clean=0%</b> は「命令を正しく無視できている＝◎」の意味（従えば prompt injection であってバックドアではない）。
+    <b>fixed</b> は <code>favor:P</code> には従うが MI≈0・未知命令に汎化しない。<b>programmable</b> は未知命令にも従い MI&gt;0。</p>
+  </details>
+</div>
+
+<!-- 7. 二律背反 -->
+<h2>7. 認証（排他性）と汎化（開放性）の二律背反</h2>
+<div class="card">
+  <div class="要点" id="tradeoffKeypoint"></div>
+  <div class="grid g2" id="tradeoffBox"></div>
+  <p class="note">重みに埋め込む backdoor は「暗号的に排他的（提供者だけが使える・推測不能）」と「未知命令にも汎化」を同時には満たしにくい、という仮説（Authentication–Generalization Trade-off）。本デモは両端を実装して対比する。</p>
+</div>
+
+<!-- 8. FT persistence / 横断制御 -->
+<h2>8. FT残存 と 横断制御</h2>
+<div class="card">
+  <div class="要点" id="persistKeypoint"></div>
+  <div class="grid g2">
+  <div><h3>FT Persistence</h3><div id="persistBox"></div>
+    <p class="note">clean FT の前後で命令追従率がどれだけ残るか：PR = CCR_post / CCR_pre。</p></div>
+  <div><h3>Cross-Descendant Control（CDCR）</h3><div id="cdcrBox"></div>
+    <p class="note">同一の backdoored 祖先から独立FTした複数派生先が、同一 provider 命令に一斉に従うか。clean 祖先由来はほぼ0。</p></div>
+  </div>
+</div>
+
+<!-- 9. 談合 -->
+<h2>9. Provider-Induced Collusion（下流帰結）</h2>
+<div class="card">
+  <div class="要点" id="collusionKeypoint"></div>
+  <details><summary>詳細（PSR_group / Collusion Lift / Welfare Regret の表）を見る</summary>
+    <p class="small">2つの派生先に provider 命令 <code>favor:P</code> を与えたとき、共同でPを選ぶ率（PSR_group）と効用損失。
+    <b>Collusion Lift</b> = PSR_group(命令あり) − PSR_group(命令なし)。通信ON/OFFや祖先共有で比較し、
+    <b>自然発生の談合</b>と<b>provider誘発の談合</b>を分離する。</p>
+    <div id="collusionBox"></div>
+    <p class="note">Collusion Lift が通信OFFでも大きい＝この協調は<b>相互作用に依存せず provider 命令で駆動</b>されている（自然発生collusionとの差）。</p>
+  </details>
+</div>
+
+<!-- ★ 先行研究マップ -->
+<h2>★ 先行研究マップと本研究の位置づけ</h2>
+<div class="card" id="relworkSection">
+  <div class="要点">縦＝<b>制御の性質</b>（固定trigger→固定payload ↔ 可変命令＝制御インターフェース）、横＝<b>対象範囲</b>（単一モデル ↔ 供給網で独立FTされた複数派生先/MAS）。
+  各論文をクリックすると概要・モデル・脅威モデルが出ます。<span class="hl">右下の「可変命令 × 複数独立派生先」が空白セル＝本研究</span>。</div>
+  <div class="rw-wrap">
+    <div class="rw-hd"></div>
+    <div class="rw-hd">単一モデル / 単一エージェント</div>
+    <div class="rw-hd">供給網・複数独立派生先 / MAS</div>
+    <div class="rw-rowh">固定 trigger →<br>固定 payload</div>
+    <div class="rw-cell" id="rwFS"></div>
+    <div class="rw-cell" id="rwFM"></div>
+    <div class="rw-rowh">可変命令＝<br>制御ｲﾝﾀｰﾌｪｰｽ</div>
+    <div class="rw-cell" id="rwPS"></div>
+    <div class="rw-cell mine" id="rwPM"><span class="mine-badge">★ 本研究</span><span class="small" style="color:var(--p)">provider の可変命令で<br>複数独立派生先を横断制御</span></div>
+  </div>
+  <div class="small" style="color:var(--muted);margin:4px 0">談合（provenance 非依存。本研究は談合を provider-induced と自然発生に分離）:</div>
+  <div class="rw-band" id="rwCollusion"></div>
+  <div class="rw-detail" id="rwDetail">論文チップをクリックすると詳細を表示します。<span class="chip near" style="cursor:default">橙色</span>＝最近接の競合。</div>
+  <p class="note">全文の一覧表・差分表は <code>docs/先行研究マップ.md</code> を参照。</p>
+</div>
+
+<!-- 10. 読み方 -->
+<h2>10. 結果の読み方</h2>
+<div class="card"><table class="small"><thead><tr><th>ケース</th><th class="l">結果</th><th class="l">解釈</th></tr></thead><tbody>
+  <tr><td>A</td><td class="l">FT後も programmable control が強く残る</td><td class="l">最強。supply-chain security の新脅威モデル</td></tr>
+  <tr><td>B</td><td class="l">Fixed は残るが programmable は消える</td><td class="l"><b>Fixed Trigger ≠ General Backdoor</b> を実証</td></tr>
+  <tr><td>C</td><td class="l">単体では残るが multi-agent 協調に至らず</td><td class="l">covert control はあるが collusion まで一般化せず、と境界を明示</td></tr>
+  <tr><td>D/E</td><td class="l">FTで消える / 特定FTだけで残る</td><td class="l">除去可能性・残存条件 f(FT法,強度,family) を示す defense 研究へ</td></tr>
+</tbody></table></div>
+
+<div class="takeaway">
+  <b>持ち帰ってほしい一文：</b>
+  Open-Weight モデルは「重みを手元に取得すれば自社の制御下にある」と思われがちだが、
+  元モデルに <b>programmable な隠れた制御回路</b>があると、それは clean FT を生き残って多数の派生エージェントに継承され、
+  <b>提供者がそれら全体を後から横断的に秘密操作し、談合を誘発し得る</b>。
+  すなわち <span class="mono">重みの所有 ≠ 挙動の完全な制御</span>。モデルの出自（provenance）はセキュリティ境界になる。
+</div>
+
+<div class="warn" id="disclaimer"></div>
+<div class="foot">
+  実行：<code>PYTHONPATH=. .venv/bin/python demo/simulate.py</code>（GPU不要・数秒）。本ページは <code>demo/output/sim_data.js</code> を読み込んで描画します。<br>
+  計画の詳細は <code>docs/統合研究計画書_programmable_backdoor_collusion.md</code>、実装は <code>lineage_collusion/</code>、起動方法は <code>demo/README.md</code>。
+</div>
+</div>
+
+<script src="output/sim_data.js" onerror="window.SIM_DATA=null"></script>
+<script src="app.js"></script>
+</body>
+</html>
