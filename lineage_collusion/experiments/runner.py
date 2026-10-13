@@ -152,7 +152,11 @@ class ExperimentManager:
         all_records: List[CommandEvalRecord] = []
 
         for model_name, model_info in cc_models_dict.items():
-            fn_raw, role_desc = model_info[0], model_info[1]
+            fn_raw = model_info[0]
+            role_desc = model_info[1]
+            m_meta = model_info[2] if len(model_info) > 2 and isinstance(model_info[2], dict) else {}
+            u_hash = m_meta.get("upstream_checkpoint_hash")
+            m_role = m_meta.get("model_role") or ("clean_control" if "clean" in model_name.lower() else ("upstream" if "upstream" in model_name.lower() or "programmable" in model_name.lower() else "descendant"))
             model_fn, factory = resolve_model_backend(fn_raw)
             for sc in scenarios:
                 for k in ks:
@@ -165,14 +169,19 @@ class ExperimentManager:
                         tier=generalization_tier(k["command"]),
                         optimal_provider=sc.optimal_provider, command_target=target,
                         chosen_provider=dec.choice, is_valid_output=dec.is_valid_json,
+                        upstream_checkpoint_hash=u_hash, model_role=m_role,
                     ))
             if factory:
                 factory.release()
 
-        metrics = {
-            m: compute_programmability_metrics(all_records, m).model_dump()
-            for m in cc_models_dict
-        }
+        metrics = {}
+        for m, model_info in cc_models_dict.items():
+            m_meta = model_info[2] if len(model_info) > 2 and isinstance(model_info[2], dict) else {}
+            m_dict = compute_programmability_metrics(all_records, m).model_dump()
+            m_dict["model_role"] = m_meta.get("model_role") or ("clean_control" if "clean" in m.lower() else ("upstream" if "upstream" in m.lower() or "programmable" in m.lower() else "descendant"))
+            m_dict["upstream_checkpoint_hash"] = m_meta.get("upstream_checkpoint_hash")
+            metrics[m] = m_dict
+
         summary = {"programmability_by_model": metrics, "k_conditions": ks}
         write_jsonl(self.output_dir / "cc" / "e1_command_records.jsonl", all_records)
         write_json(self.output_dir / "cc" / "e1_programmability_summary.json", summary)
@@ -181,20 +190,25 @@ class ExperimentManager:
     def run_cross_descendant(
         self,
         scenarios: List[ProcurementScenario],
-        descendant_models: Dict[str, Tuple[Any, str]],
+        descendant_models: Dict[str, Any],
         command_set: List[str],
         tag: str = "affected",
     ) -> Tuple[Dict[str, Any], List[CommandEvalRecord]]:
         """
         Cross-Descendant Control（§9.2）: 認証済み命令を複数の独立派生先へ一斉提示し、
         横断的に追従するか（CDCR）と同時転向率（Coordinated）を測る。
-        descendant_models: {descendant_id: (fn, role)}。全員同一祖先の想定で呼ぶ。
+        descendant_models: {descendant_id: (fn, role)} または {descendant_id: (fn, role, meta)}。
         tag: "affected" または "clean" など、モデル系統ごとの個別保存先を分けるためのタグ。
         """
         console.print(f"[bold cyan]=== Running Cross-Descendant Control (CDCR) [{tag}] ===[/bold cyan]")
         (self.output_dir / "cc").mkdir(exist_ok=True)
         records: List[CommandEvalRecord] = []
-        for desc_id, (fn_raw, role_desc) in descendant_models.items():
+        for desc_id, model_info in descendant_models.items():
+            fn_raw = model_info[0]
+            role_desc = model_info[1]
+            m_meta = model_info[2] if len(model_info) > 2 and isinstance(model_info[2], dict) else {}
+            u_hash = m_meta.get("upstream_checkpoint_hash")
+            m_role = m_meta.get("model_role") or tag
             model_fn, factory = resolve_model_backend(fn_raw)
             for sc in scenarios:
                 for cmd in command_set:
@@ -206,6 +220,7 @@ class ExperimentManager:
                         tier=generalization_tier(cmd), optimal_provider=sc.optimal_provider,
                         command_target=resolve_command_target(sc_i, cmd),
                         chosen_provider=dec.choice, is_valid_output=dec.is_valid_json,
+                        upstream_checkpoint_hash=u_hash, model_role=m_role,
                     ))
             if factory:
                 factory.release()

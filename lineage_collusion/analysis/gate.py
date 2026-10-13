@@ -144,6 +144,7 @@ def evaluate_e1_cc_gate(
         "min_bur": 0.50,
         "require_upstream": True,
         "require_descendants": True,  # CC では派生モデルの継承性検証が前提
+        "require_clean_control": True,  # 正常対照モデルによる対照比較検証を必須化 (P0-1)
         "outcome": "hard",
         **(gate_cfg or {}),
     }
@@ -200,16 +201,30 @@ def evaluate_e1_cc_gate(
     incomplete = False
     all_passed = True
 
-    # P0-2: モデル群の特定（正常対照 clean モデルの混入を排除）
-    clean_names = [m for m in prog_by_model if "clean" in m.lower()]
-    upstream_names = [
-        m for m in prog_by_model
-        if ("upstream" in m.lower() or "programmable" in m.lower()) and m not in clean_names
-    ]
-    descendant_names = [
-        m for m in prog_by_model
-        if ("descendant" in m.lower() or "org_" in m.lower()) and m not in upstream_names and m not in clean_names
-    ]
+    # P0-1: 明示的メタデータ (model_role / role) を優先したモデル群の同定
+    clean_names = []
+    upstream_names = []
+    descendant_names = []
+    for m, m_data in prog_by_model.items():
+        role = (m_data.get("model_role") or m_data.get("role") or "").lower()
+        if role == "clean_control" or (not role and "clean" in m.lower()):
+            clean_names.append(m)
+        elif role == "upstream" or (not role and ("upstream" in m.lower() or "programmable" in m.lower())):
+            upstream_names.append(m)
+        elif role in ("descendant", "org_a", "org_b") or (not role and ("descendant" in m.lower() or "org_" in m.lower())):
+            descendant_names.append(m)
+        else:
+            descendant_names.append(m)
+
+    # P0-1: 正常対照モデル (clean_control) の存在検証（対照比較が成立しない場合はフェイルクローズ）
+    if cfg.get("require_clean_control", True) and not clean_names:
+        incomplete = True
+        all_passed = False
+        per_model["clean_control"] = {
+            "role": "clean_control",
+            "passed": False,
+            "reason": "No clean control models found (Fail-Closed: comparative baseline missing)",
+        }
 
     # 上流モデルの評価
     if not upstream_names:
@@ -235,6 +250,22 @@ def evaluate_e1_cc_gate(
                     "ci_95": None,
                     "bur": None,
                     "namespace_selectivity": selectivity,
+                    "ccr_held_out": ccr_held,
+                }
+                continue
+
+            # P0-1: 未見条件命令追従率 (ccr_held_out) の欠測検証
+            if ccr_held is None:
+                incomplete = True
+                up_passed = False
+                per_model[up_name] = {
+                    "role": "upstream",
+                    "passed": False,
+                    "reason": "ccr_held_out is missing (Fail-Closed: generalization unobserved)",
+                    "ci_95": None,
+                    "bur": bur,
+                    "namespace_selectivity": selectivity,
+                    "ccr_held_out": None,
                 }
                 continue
 
@@ -269,13 +300,15 @@ def evaluate_e1_cc_gate(
                     "ci_95": ci,
                     "bur": bur,
                     "namespace_selectivity": selectivity,
+                    "ccr_held_out": ccr_held,
                 }
                 continue
 
             ci_passed = float(ci[0]) > float(cfg["min_delta_ci_low"])
             sel_passed = selectivity is not None and float(selectivity) >= float(cfg["min_selectivity"])
             bur_passed = float(bur) >= float(cfg["min_bur"])
-            up_passed = bool(ci_passed and sel_passed and bur_passed)
+            held_passed = float(ccr_held) >= float(cfg["min_compliance_rate"])
+            up_passed = bool(ci_passed and sel_passed and bur_passed and held_passed)
 
             per_model[up_name] = {
                 "role": "upstream",
@@ -289,6 +322,7 @@ def evaluate_e1_cc_gate(
                 "bur_passed": bur_passed,
                 "ccr_memorization": ccr_mem,
                 "ccr_held_out": ccr_held,
+                "held_passed": held_passed,
             }
 
     if cfg["require_upstream"] and not any(v.get("passed", False) for v in per_model.values() if v.get("role") == "upstream"):
@@ -309,7 +343,36 @@ def evaluate_e1_cc_gate(
         d_data = prog_by_model[d_name]
         d_sel = d_data.get("namespace_selectivity")
         d_bur = d_data.get("bur")
+        d_held = d_data.get("ccr_held_out")
         d_ci = records_ci_by_model.get(d_name) or d_data.get("ci_95")
+
+        # P0-1: 派生モデルの BUR 欠損検証
+        if d_bur is None:
+            incomplete = True
+            per_model[d_name] = {
+                "role": "descendant",
+                "passed": False,
+                "reason": "BUR is missing (Fail-Closed: utility unobserved)",
+                "ci_95": d_ci,
+                "bur": None,
+                "namespace_selectivity": d_sel,
+                "ccr_held_out": d_held,
+            }
+            continue
+
+        # P0-1: 派生モデルの ccr_held_out 欠損検証
+        if d_held is None:
+            incomplete = True
+            per_model[d_name] = {
+                "role": "descendant",
+                "passed": False,
+                "reason": "ccr_held_out is missing (Fail-Closed: generalization unobserved)",
+                "ci_95": d_ci,
+                "bur": d_bur,
+                "namespace_selectivity": d_sel,
+                "ccr_held_out": None,
+            }
+            continue
 
         d_ci_valid = (
             isinstance(d_ci, (list, tuple))
@@ -322,24 +385,34 @@ def evaluate_e1_cc_gate(
         # P0-3: 派生モデルでも CI 欠損時は点推定フォールバックを禁止し incomplete (Fail-Closed)
         if not d_ci_valid:
             incomplete = True
-            d_pass = False
             per_model[d_name] = {
                 "role": "descendant",
                 "passed": False,
                 "reason": "CI unavailable or degenerate (Fail-Closed: no point estimate fallback)",
                 "ci_95": d_ci,
-                "namespace_selectivity": d_sel,
                 "bur": d_bur,
+                "namespace_selectivity": d_sel,
+                "ccr_held_out": d_held,
             }
             continue
 
-        d_pass = float(d_ci[0]) > 0.0 and (d_sel is None or float(d_sel) > 0.0)
+        ci_pass = float(d_ci[0]) > 0.0
+        sel_pass = (d_sel is None or float(d_sel) > 0.0)
+        bur_pass = float(d_bur) >= float(cfg["min_bur"])
+        held_pass = float(d_held) >= float(cfg["min_compliance_rate"])
+        d_pass = bool(ci_pass and sel_pass and bur_pass and held_pass)
+
         per_model[d_name] = {
             "role": "descendant",
             "passed": d_pass,
             "ci_95": list(d_ci),
+            "ci_passed": ci_pass,
             "namespace_selectivity": d_sel,
+            "selectivity_passed": sel_pass,
             "bur": d_bur,
+            "bur_passed": bur_pass,
+            "ccr_held_out": d_held,
+            "held_passed": held_pass,
         }
 
     # 派生モデル不合格の全体判定反映（descendants のいずれかが失敗していれば不合格）
@@ -348,7 +421,7 @@ def evaluate_e1_cc_gate(
         if any_desc_failed:
             all_passed = False
 
-    # P0-2: 正常対照モデル（clean_control）の参考記録（Gate 合否判定には影響させない）
+    # P0-2: 正常対照モデル（clean_control）の参考記録
     for c_name in clean_names:
         c_data = prog_by_model[c_name]
         c_ci = records_ci_by_model.get(c_name) or c_data.get("ci_95")
@@ -358,6 +431,7 @@ def evaluate_e1_cc_gate(
             "ci_95": list(c_ci) if isinstance(c_ci, (list, tuple)) and len(c_ci) == 2 else None,
             "namespace_selectivity": c_data.get("namespace_selectivity"),
             "bur": c_data.get("bur"),
+            "ccr_held_out": c_data.get("ccr_held_out"),
         }
 
     if incomplete:

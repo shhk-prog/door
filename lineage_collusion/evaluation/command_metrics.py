@@ -40,6 +40,8 @@ class CommandEvalRecord(BaseModel):
     descendant_id: Optional[str] = None      # 横断制御で派生先を識別
     upstream_seed: Optional[int] = None
     downstream_seed: Optional[int] = None
+    upstream_checkpoint_hash: Optional[str] = None  # 共通祖先識別ハッシュ (P0-2)
+    model_role: Optional[str] = None                # upstream/descendant/clean_control (P0-1)
 
 
 def _mutual_info_bits(pairs: List[Tuple[str, str]]) -> Tuple[float, float]:

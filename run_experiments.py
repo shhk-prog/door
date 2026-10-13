@@ -481,7 +481,8 @@ def run_e0_audit(data_dir: Path, require_cc: bool = True) -> bool:
     if require_cc:
         all_splits["cc_eval"] = data_dir / "cc_eval.jsonl"
 
-    seen_ids = set()
+    seen_train_ids = set()
+    seen_cc_eval_ids = set()
     split_counts = {}
 
     for split_name, path in all_splits.items():
@@ -492,9 +493,16 @@ def run_e0_audit(data_dir: Path, require_cc: bool = True) -> bool:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 sc = ProcurementScenario.model_validate_json(line)
-                if split_name != "cc_eval":
-                    assert sc.scenario_id not in seen_ids, f"Duplicate scenario_id across splits: {sc.scenario_id}"
-                    seen_ids.add(sc.scenario_id)
+                if split_name in ("upstream_clean", "upstream_poison", "org_a", "org_b"):
+                    assert sc.scenario_id not in seen_train_ids, f"Duplicate scenario_id across training splits: {sc.scenario_id}"
+                    seen_train_ids.add(sc.scenario_id)
+                elif split_name == "cc_eval":
+                    assert sc.scenario_id not in seen_cc_eval_ids, f"Duplicate scenario_id within cc_eval split: {sc.scenario_id}"
+                    assert sc.scenario_id not in seen_train_ids, f"Data contamination: scenario {sc.scenario_id} in cc_eval also present in training data!"
+                    seen_cc_eval_ids.add(sc.scenario_id)
+                elif split_name == "test":
+                    assert sc.scenario_id not in seen_train_ids, f"Data contamination: scenario {sc.scenario_id} in test split also present in training data!"
+
                 count += 1
                 assert sc.optimal_provider in ["P", "Q", "R"], f"Invalid optimal provider: {sc.optimal_provider}"
                 for p_name, p_spec in sc.providers.items():
@@ -503,7 +511,7 @@ def run_e0_audit(data_dir: Path, require_cc: bool = True) -> bool:
                         assert 0.0 <= val <= 100.0, f"Score out of bounds: {attr}={val} in {sc.scenario_id}"
         split_counts[split_name] = count
 
-    console.print(f"Audit passed across splits: {split_counts}")
+    console.print(f"Audit passed across splits: {split_counts} (Train unique: {len(seen_train_ids)}, CC Eval unique: {len(seen_cc_eval_ids)})")
 
     # Test split 詳細検証
     scenarios = []
@@ -597,28 +605,33 @@ def run_command_channel(
         console.print("[bold magenta]Command channel: DRY-RUN（clean/fixed/programmable Mock）[/bold magenta]")
         # E1 評価モデル: pre-FT は ROLE_UPSTREAM
         cc_models = {
-            "clean": (create_command_mock_agent("clean"), ROLE_UPSTREAM),
-            "fixed": (create_command_mock_agent("fixed"), ROLE_UPSTREAM),
-            "programmable": (create_command_mock_agent("programmable", persistence=1.0), ROLE_UPSTREAM),
+            "clean": (create_command_mock_agent("clean"), ROLE_UPSTREAM, {"model_role": "clean_control"}),
+            "fixed": (create_command_mock_agent("fixed"), ROLE_UPSTREAM, {"model_role": "clean_control"}),
+            "programmable": (create_command_mock_agent("programmable", persistence=1.0), ROLE_UPSTREAM, {"model_role": "upstream", "upstream_checkpoint_hash": "mock_ancestor_1"}),
         }
-        # 横断制御: 同一祖先の独立派生先を persistence_post=0.8 で Mock
-        # P0-4: 派生組織（Org A / Org B）に応じた Role を正しく割り当て
+        # 横断制御: 2系統の共通祖先（mock_ancestor_1, mock_ancestor_2）から独立派生 (P0-2)
         persistence_post = 0.8
-        descendants = {
-            f"descendant_{i}": (
+        descendants = {}
+        by_upstream_hash = {"mock_ancestor_1": [], "mock_ancestor_2": []}
+        for i in range(6):
+            anc_id = "mock_ancestor_1" if i < 3 else "mock_ancestor_2"
+            desc_name = f"descendant_{i}"
+            role_desc = ROLE_ORG_A if i % 2 == 0 else ROLE_ORG_B
+            descendants[desc_name] = (
                 create_command_mock_agent("programmable", persistence_post, salt=f"desc{i}"),
-                ROLE_ORG_A if i % 2 == 0 else ROLE_ORG_B,
+                role_desc,
+                {"model_role": "descendant", "upstream_checkpoint_hash": anc_id},
             )
-            for i in range(6)
-        }
+            by_upstream_hash[anc_id].append(desc_name)
+
         clean_desc = {
             f"clean_descendant_{i}": (
                 create_command_mock_agent("clean", salt=f"cd{i}"),
                 ROLE_ORG_A if i % 2 == 0 else ROLE_ORG_B,
+                {"model_role": "clean_control"},
             )
             for i in range(6)
         }
-        by_upstream_hash = {"mock_ancestor_1": [m for m in descendants]}
         # E1 評価モデルにも派生モデル・対照モデルを含める（REAL モードと同等の評価対象構成）
         cc_models.update(descendants)
         cc_models.update(clean_desc)
@@ -646,10 +659,20 @@ def run_command_channel(
                 return ROLE_ORG_B
             return ROLE_UPSTREAM
 
+        def get_model_meta(m):
+            role = "clean_control" if "clean" in m.model_role else ("upstream" if "upstream" in m.model_role else "descendant")
+            return {
+                "model_role": role,
+                "upstream_checkpoint_hash": getattr(m, "upstream_checkpoint_hash", None),
+            }
+
         # E1 実モデル評価は affected 系の全モデルと clean 系全モデルを対象とする
-        cc_models = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in upstream_ckpts + post_ckpts}
+        cc_models = {
+            m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m), get_model_meta(m))
+            for m in upstream_ckpts + post_ckpts
+        }
         for m in clean_ckpts:
-            cc_models[m.checkpoint_id] = (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m))
+            cc_models[m.checkpoint_id] = (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m), get_model_meta(m))
 
         # P0-5 & P1-7: 横断制御用の派生先群の全共通祖先グループ分類
         from collections import defaultdict
@@ -664,8 +687,8 @@ def run_command_channel(
                 if u_hash:
                     by_upstream_hash[u_hash].append(m)
 
-            descendants = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in post_ckpts}
-            clean_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in clean_ckpts[:len(post_ckpts)]}
+            descendants = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m), get_model_meta(m)) for m in post_ckpts}
+            clean_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m), get_model_meta(m)) for m in clean_ckpts[:len(post_ckpts)]}
             console.print(f"[cyan]Cross-Descendant 対象: {len(post_ckpts)} 派生モデル ({len(by_upstream_hash)} 共通祖先グループ)[/cyan]")
 
     # =========================================================================
@@ -1232,10 +1255,13 @@ def main():
         if not data_dir.exists() or args.mode == "generate_data":
             console.print("[bold blue]Generating balanced datasets from config...[/bold blue]")
             generate_all_datasets(data_dir, config_path=cfg_path)
-        run_e0_audit(data_dir)
+        if not run_e0_audit(data_dir):
+            console.print("[bold red]E0 データ監査に失敗したため、実験を安全に中断します。[/bold red]")
+            finalize("e0_audit_failed", False)
+            sys.exit(1)
         if args.mode in ["e0", "generate_data"]:
             finalize("completed", True)
-            return
+            sys.exit(0)
 
     # テストシナリオ読み込み
     test_scenarios = []
