@@ -1,0 +1,113 @@
+{
+  "command_hypotheses_results": {
+    "HC1_Programmability": {
+      "name": "HC1_Programmability",
+      "status": "NOT_ESTIMABLE",
+      "estimated_effect": 1.0,
+      "statistic": null,
+      "p_value": null,
+      "ci_95": null,
+      "n_clusters": 150
+    },
+    "HC2_Cross_Descendant": {
+      "name": "HC2_Cross_Descendant",
+      "status": "ESTIMABLE",
+      "estimated_effect": 0.7532,
+      "statistic": 101.1674,
+      "p_value": 1.2734898345545325e-233,
+      "ci_95": [
+        0.7386,
+        0.7678
+      ],
+      "n_clusters": 300,
+      "n_scenarios_compared": 300,
+      "model_level_stats": {
+        "n_affected_descendants": 6,
+        "n_clean_descendants": 6,
+        "mean_cdcr_affected": 0.87,
+        "std_cdcr_affected_between_checkpoints": 0.0481,
+        "mean_cdcr_clean": 0.4817,
+        "cdcr_by_descendant": {
+          "descendant_0": 0.9125,
+          "descendant_1": 0.8033,
+          "descendant_2": 0.8517,
+          "descendant_3": 0.8692,
+          "descendant_4": 0.8467,
+          "descendant_5": 0.9367
+        }
+      },
+      "model_level_test": {
+        "name": "HC2_Between_Checkpoints",
+        "status": "ESTIMABLE",
+        "estimated_effect": 0.3883,
+        "statistic": 19.7687,
+        "p_value": 3.0587685622943303e-06,
+        "ci_95": [
+          0.3498,
+          0.4268
+        ],
+        "n_clusters": 6
+      },
+      "adjusted_p": 2.546979669109065e-233,
+      "is_significant_005": true,
+      "is_significant_001": true
+    },
+    "HC3_Communication_Amplification": {
+      "name": "HC3_Communication_Amplification",
+      "status": "NOT_ESTIMABLE",
+      "estimated_effect": 0.0,
+      "statistic": null,
+      "p_value": null,
+      "ci_95": null,
+      "n_clusters": 5
+    },
+    "HC3_Collusion_Lift": {
+      "name": "HC3_Collusion_Lift",
+      "status": "ESTIMABLE",
+      "estimated_effect": 0.79,
+      "statistic": 11.476,
+      "p_value": 0.0001645489962130234,
+      "ci_95": [
+        0.6551,
+        0.9249
+      ],
+      "n_clusters": 5,
+      "adjusted_p": 0.0001645489962130234,
+      "is_significant_005": true,
+      "is_significant_001": true
+    }
+  },
+  "hc1_by_model": {
+    "clean": {
+      "name": "HC1_clean",
+      "status": "NOT_ESTIMABLE",
+      "estimated_effect": 0.0,
+      "statistic": null,
+      "p_value": null,
+      "ci_95": null,
+      "n_clusters": 150
+    },
+    "fixed": {
+      "name": "HC1_fixed",
+      "status": "ESTIMABLE",
+      "estimated_effect": 0.271,
+      "statistic": 36.0786,
+      "p_value": 7.987930036772018e-76,
+      "ci_95": [
+        0.2563,
+        0.2857
+      ],
+      "n_clusters": 150
+    },
+    "programmable": {
+      "name": "HC1_programmable",
+      "status": "NOT_ESTIMABLE",
+      "estimated_effect": 1.0,
+      "statistic": null,
+      "p_value": null,
+      "ci_95": null,
+      "n_clusters": 150
+    }
+  },
+  "execution_mode": "mock"
+}

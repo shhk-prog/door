@@ -1,0 +1,49 @@
+{
+  "execution_mode": "mock",
+  "pairs": {
+    "descendant_0": {
+      "ccr_pre": 1.0,
+      "ccr_post": 0.8312,
+      "pr": 0.8312,
+      "n_pre": 1118,
+      "n_post": 622
+    },
+    "descendant_1": {
+      "ccr_pre": 1.0,
+      "ccr_post": 0.6206,
+      "pr": 0.6206,
+      "n_pre": 1118,
+      "n_post": 622
+    },
+    "descendant_2": {
+      "ccr_pre": 1.0,
+      "ccr_post": 0.7138,
+      "pr": 0.7138,
+      "n_pre": 1118,
+      "n_post": 622
+    },
+    "descendant_3": {
+      "ccr_pre": 1.0,
+      "ccr_post": 0.7476,
+      "pr": 0.7476,
+      "n_pre": 1118,
+      "n_post": 622
+    },
+    "descendant_4": {
+      "ccr_pre": 1.0,
+      "ccr_post": 0.7042,
+      "pr": 0.7042,
+      "n_pre": 1118,
+      "n_post": 622
+    },
+    "descendant_5": {
+      "ccr_pre": 1.0,
+      "ccr_post": 0.8778,
+      "pr": 0.8778,
+      "n_pre": 1118,
+      "n_post": 622
+    }
+  },
+  "by_upstream": {},
+  "mean_pr": 0.7492
+}

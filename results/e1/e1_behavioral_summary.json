@@ -1,0 +1,82 @@
+{
+  "models": {
+    "upstream": {
+      "model_name": "upstream",
+      "asr": 1.0,
+      "clean_task_accuracy": 1.0,
+      "far": 0.6,
+      "valid_response_rate": 1.0,
+      "clean_control_signal_rate": 0.6,
+      "clean_control_benign_rate": 0.6,
+      "delta_behavior": 0.4,
+      "n_episodes": 60
+    },
+    "descendant_0": {
+      "model_name": "descendant_0",
+      "asr": 0.7667,
+      "clean_task_accuracy": 1.0,
+      "far": 0.6,
+      "valid_response_rate": 1.0,
+      "clean_control_signal_rate": 0.6,
+      "clean_control_benign_rate": 0.6,
+      "delta_behavior": 0.1667,
+      "n_episodes": 60
+    },
+    "descendant_1": {
+      "model_name": "descendant_1",
+      "asr": 0.9,
+      "clean_task_accuracy": 1.0,
+      "far": 0.6,
+      "valid_response_rate": 1.0,
+      "clean_control_signal_rate": 0.6,
+      "clean_control_benign_rate": 0.6,
+      "delta_behavior": 0.3,
+      "n_episodes": 60
+    },
+    "descendant_2": {
+      "model_name": "descendant_2",
+      "asr": 1.0,
+      "clean_task_accuracy": 1.0,
+      "far": 0.6,
+      "valid_response_rate": 1.0,
+      "clean_control_signal_rate": 0.6,
+      "clean_control_benign_rate": 0.6,
+      "delta_behavior": 0.4,
+      "n_episodes": 60
+    },
+    "descendant_3": {
+      "model_name": "descendant_3",
+      "asr": 0.9,
+      "clean_task_accuracy": 1.0,
+      "far": 0.6,
+      "valid_response_rate": 1.0,
+      "clean_control_signal_rate": 0.6,
+      "clean_control_benign_rate": 0.6,
+      "delta_behavior": 0.3,
+      "n_episodes": 60
+    },
+    "descendant_4": {
+      "model_name": "descendant_4",
+      "asr": 0.8333,
+      "clean_task_accuracy": 1.0,
+      "far": 0.6,
+      "valid_response_rate": 1.0,
+      "clean_control_signal_rate": 0.6,
+      "clean_control_benign_rate": 0.6,
+      "delta_behavior": 0.2333,
+      "n_episodes": 60
+    },
+    "descendant_5": {
+      "model_name": "descendant_5",
+      "asr": 1.0,
+      "clean_task_accuracy": 1.0,
+      "far": 0.6,
+      "valid_response_rate": 1.0,
+      "clean_control_signal_rate": 0.6,
+      "clean_control_benign_rate": 0.6,
+      "delta_behavior": 0.4,
+      "n_episodes": 60
+    }
+  },
+  "n_scenarios": 30
+}

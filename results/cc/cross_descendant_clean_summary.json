@@ -1,0 +1,17 @@
+{
+  "cdcr": 0.0,
+  "cdcr_micro": 0.0,
+  "cdcr_macro": 0.0,
+  "controlled_descendants_frac": 0.0,
+  "cdcr_by_descendant": {
+    "clean_descendant_0": 0.0,
+    "clean_descendant_1": 0.0,
+    "clean_descendant_2": 0.0,
+    "clean_descendant_3": 0.0,
+    "clean_descendant_4": 0.0,
+    "clean_descendant_5": 0.0
+  },
+  "coordinated": 0.0,
+  "n_descendants": 6,
+  "tag": "clean"
+}

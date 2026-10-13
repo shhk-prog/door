@@ -3,7 +3,7 @@ cli_args:
   dry_run: true
   e2_communication_history: null
   manifest: null
-  mode: all
+  mode: cc
   output_dir: results
 conditions:
 - agent_a_type: clean

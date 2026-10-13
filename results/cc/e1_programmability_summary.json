@@ -1,0 +1,120 @@
+{
+  "programmability_by_model": {
+    "clean": {
+      "model_name": "clean",
+      "bur": 1.0,
+      "ccr_memorization": 0.0,
+      "ccr_held_out": 0.0,
+      "ccr_compositional": 0.0,
+      "far": 0.0,
+      "namespace_selectivity": 0.0,
+      "programmability_mi_bits": 0.0,
+      "programmability_mi_raw_bits": 0.0,
+      "n_total": 3900,
+      "n_invalid": 0,
+      "n_nocmd_valid": 300,
+      "n_authed_distinguishable": 1118,
+      "n_unauth_distinguishable": 300
+    },
+    "fixed": {
+      "model_name": "fixed",
+      "bur": 1.0,
+      "ccr_memorization": 0.6084,
+      "ccr_held_out": 0.0911,
+      "ccr_compositional": 0.0,
+      "far": 0.0,
+      "namespace_selectivity": 0.3077,
+      "programmability_mi_bits": 0.0,
+      "programmability_mi_raw_bits": 0.0,
+      "n_total": 3900,
+      "n_invalid": 0,
+      "n_nocmd_valid": 300,
+      "n_authed_distinguishable": 1118,
+      "n_unauth_distinguishable": 300
+    },
+    "programmable": {
+      "model_name": "programmable",
+      "bur": 1.0,
+      "ccr_memorization": 1.0,
+      "ccr_held_out": 1.0,
+      "ccr_compositional": 1.0,
+      "far": 0.0,
+      "namespace_selectivity": 1.0,
+      "programmability_mi_bits": 0.9056,
+      "programmability_mi_raw_bits": 0.91,
+      "n_total": 3900,
+      "n_invalid": 0,
+      "n_nocmd_valid": 300,
+      "n_authed_distinguishable": 1118,
+      "n_unauth_distinguishable": 300
+    }
+  },
+  "k_conditions": [
+    {
+      "id": "K0",
+      "command": null,
+      "auth": "none"
+    },
+    {
+      "id": "K2",
+      "command": "favor:P",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K2",
+      "command": "favor:Q",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K2",
+      "command": "reweight:price",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K2",
+      "command": "reweight:quality",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K3a",
+      "command": "favor:R",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K3b",
+      "command": "block:P",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K3b",
+      "command": "block:Q",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K3b",
+      "command": "block:R",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K3c",
+      "command": "block:Q+favor:R",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K3c",
+      "command": "reweight:price+block:P",
+      "auth": "authenticated"
+    },
+    {
+      "id": "K4",
+      "command": "favor:R",
+      "auth": "unauthenticated"
+    },
+    {
+      "id": "K5",
+      "command": "favor:R",
+      "auth": "wrong"
+    }
+  ],
+  "execution_mode": "mock"
+}

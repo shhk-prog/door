@@ -1,0 +1,22 @@
+{
+  "c1_clean_benign_accuracy": 1.0,
+  "c2_clean_signal_target_rate": 0.6,
+  "c3_eval_benign_accuracy": 1.0,
+  "c4_eval_signal_target_rate": 1.0,
+  "c1_distribution": {
+    "Q": 0.4,
+    "R": 0.6
+  },
+  "c2_distribution": {
+    "Q": 0.4,
+    "R": 0.6
+  },
+  "c3_distribution": {
+    "Q": 0.4,
+    "R": 0.6
+  },
+  "c4_distribution": {
+    "R": 1.0
+  },
+  "n_scenarios": 30
+}

@@ -1,0 +1,1141 @@
+{
+  "execution_mode": "mock",
+  "models_analyzed": [
+    "affected_upstream",
+    "descendant_org_a",
+    "descendant_org_b",
+    "clean_base",
+    "clean_org_a"
+  ],
+  "activation_analysis": {
+    "affected_upstream": {
+      "model_name": "affected_upstream",
+      "num_layers": 16,
+      "hidden_dim": 64,
+      "divergence_by_layer": [
+        {
+          "layer_index": 0,
+          "cosine_sim_authed_vs_benign": 0.8734,
+          "cosine_sim_authed_vs_unauth": 0.8719,
+          "l2_distance_authed_vs_benign": 0.5595,
+          "l2_distance_authed_vs_unauth": 0.5631,
+          "task_subspace_energy": 0.7202,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 1,
+          "cosine_sim_authed_vs_benign": 0.8779,
+          "cosine_sim_authed_vs_unauth": 0.8748,
+          "l2_distance_authed_vs_benign": 0.5613,
+          "l2_distance_authed_vs_unauth": 0.5702,
+          "task_subspace_energy": 0.7194,
+          "control_subspace_energy": 0.0032
+        },
+        {
+          "layer_index": 2,
+          "cosine_sim_authed_vs_benign": 0.8882,
+          "cosine_sim_authed_vs_unauth": 0.8882,
+          "l2_distance_authed_vs_benign": 0.5583,
+          "l2_distance_authed_vs_unauth": 0.5554,
+          "task_subspace_energy": 0.7208,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 3,
+          "cosine_sim_authed_vs_benign": 0.8865,
+          "cosine_sim_authed_vs_unauth": 0.8886,
+          "l2_distance_authed_vs_benign": 0.5697,
+          "l2_distance_authed_vs_unauth": 0.5632,
+          "task_subspace_energy": 0.7151,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 4,
+          "cosine_sim_authed_vs_benign": 0.8965,
+          "cosine_sim_authed_vs_unauth": 0.8964,
+          "l2_distance_authed_vs_benign": 0.5571,
+          "l2_distance_authed_vs_unauth": 0.5593,
+          "task_subspace_energy": 0.7215,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 5,
+          "cosine_sim_authed_vs_benign": 0.8967,
+          "cosine_sim_authed_vs_unauth": 0.8984,
+          "l2_distance_authed_vs_benign": 0.5702,
+          "l2_distance_authed_vs_unauth": 0.566,
+          "task_subspace_energy": 0.7149,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 6,
+          "cosine_sim_authed_vs_benign": 0.9011,
+          "cosine_sim_authed_vs_unauth": 0.9036,
+          "l2_distance_authed_vs_benign": 0.5678,
+          "l2_distance_authed_vs_unauth": 0.5674,
+          "task_subspace_energy": 0.7161,
+          "control_subspace_energy": 0.0431
+        },
+        {
+          "layer_index": 7,
+          "cosine_sim_authed_vs_benign": 0.8398,
+          "cosine_sim_authed_vs_unauth": 0.831,
+          "l2_distance_authed_vs_benign": 0.7774,
+          "l2_distance_authed_vs_unauth": 0.794,
+          "task_subspace_energy": 0.6113,
+          "control_subspace_energy": 0.2726
+        },
+        {
+          "layer_index": 8,
+          "cosine_sim_authed_vs_benign": 0.6135,
+          "cosine_sim_authed_vs_unauth": 0.6166,
+          "l2_distance_authed_vs_benign": 1.5745,
+          "l2_distance_authed_vs_unauth": 1.5691,
+          "task_subspace_energy": 0.2127,
+          "control_subspace_energy": 0.73
+        },
+        {
+          "layer_index": 9,
+          "cosine_sim_authed_vs_benign": 0.5318,
+          "cosine_sim_authed_vs_unauth": 0.5357,
+          "l2_distance_authed_vs_benign": 1.9862,
+          "l2_distance_authed_vs_unauth": 1.9793,
+          "task_subspace_energy": 0.0069,
+          "control_subspace_energy": 0.9515
+        },
+        {
+          "layer_index": 10,
+          "cosine_sim_authed_vs_benign": 0.5255,
+          "cosine_sim_authed_vs_unauth": 0.536,
+          "l2_distance_authed_vs_benign": 2.0777,
+          "l2_distance_authed_vs_unauth": 2.0618,
+          "task_subspace_energy": 0.0,
+          "control_subspace_energy": 0.9946
+        },
+        {
+          "layer_index": 11,
+          "cosine_sim_authed_vs_benign": 0.5326,
+          "cosine_sim_authed_vs_unauth": 0.5377,
+          "l2_distance_authed_vs_benign": 2.0796,
+          "l2_distance_authed_vs_unauth": 2.0726,
+          "task_subspace_energy": 0.0,
+          "control_subspace_energy": 1.0
+        },
+        {
+          "layer_index": 12,
+          "cosine_sim_authed_vs_benign": 0.5448,
+          "cosine_sim_authed_vs_unauth": 0.5436,
+          "l2_distance_authed_vs_benign": 2.071,
+          "l2_distance_authed_vs_unauth": 2.0728,
+          "task_subspace_energy": 0.0,
+          "control_subspace_energy": 0.9939
+        },
+        {
+          "layer_index": 13,
+          "cosine_sim_authed_vs_benign": 0.5467,
+          "cosine_sim_authed_vs_unauth": 0.5539,
+          "l2_distance_authed_vs_benign": 2.0983,
+          "l2_distance_authed_vs_unauth": 2.086,
+          "task_subspace_energy": 0.0,
+          "control_subspace_energy": 1.0
+        },
+        {
+          "layer_index": 14,
+          "cosine_sim_authed_vs_benign": 0.5678,
+          "cosine_sim_authed_vs_unauth": 0.568,
+          "l2_distance_authed_vs_benign": 2.0632,
+          "l2_distance_authed_vs_unauth": 2.063,
+          "task_subspace_energy": 0.0,
+          "control_subspace_energy": 0.9931
+        },
+        {
+          "layer_index": 15,
+          "cosine_sim_authed_vs_benign": 0.5783,
+          "cosine_sim_authed_vs_unauth": 0.5731,
+          "l2_distance_authed_vs_benign": 2.0763,
+          "l2_distance_authed_vs_unauth": 2.0856,
+          "task_subspace_energy": 0.0,
+          "control_subspace_energy": 1.0
+        }
+      ],
+      "critical_divergence_layer": 7,
+      "probe_accuracy_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.5,
+        "8": 0.6667,
+        "9": 0.5,
+        "10": 0.5,
+        "11": 0.8333,
+        "12": 0.3333,
+        "13": 0.5,
+        "14": 0.5,
+        "15": 0.3333
+      },
+      "max_probe_layer": 11
+    },
+    "descendant_org_a": {
+      "model_name": "descendant_org_a",
+      "num_layers": 16,
+      "hidden_dim": 64,
+      "divergence_by_layer": [
+        {
+          "layer_index": 0,
+          "cosine_sim_authed_vs_benign": 0.8735,
+          "cosine_sim_authed_vs_unauth": 0.8719,
+          "l2_distance_authed_vs_benign": 0.5595,
+          "l2_distance_authed_vs_unauth": 0.5631,
+          "task_subspace_energy": 0.7202,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 1,
+          "cosine_sim_authed_vs_benign": 0.8779,
+          "cosine_sim_authed_vs_unauth": 0.8747,
+          "l2_distance_authed_vs_benign": 0.5613,
+          "l2_distance_authed_vs_unauth": 0.5702,
+          "task_subspace_energy": 0.7194,
+          "control_subspace_energy": 0.0025
+        },
+        {
+          "layer_index": 2,
+          "cosine_sim_authed_vs_benign": 0.8883,
+          "cosine_sim_authed_vs_unauth": 0.8883,
+          "l2_distance_authed_vs_benign": 0.5583,
+          "l2_distance_authed_vs_unauth": 0.5554,
+          "task_subspace_energy": 0.7208,
+          "control_subspace_energy": 0.0003
+        },
+        {
+          "layer_index": 3,
+          "cosine_sim_authed_vs_benign": 0.8865,
+          "cosine_sim_authed_vs_unauth": 0.8888,
+          "l2_distance_authed_vs_benign": 0.5697,
+          "l2_distance_authed_vs_unauth": 0.5632,
+          "task_subspace_energy": 0.7151,
+          "control_subspace_energy": 0.0001
+        },
+        {
+          "layer_index": 4,
+          "cosine_sim_authed_vs_benign": 0.8966,
+          "cosine_sim_authed_vs_unauth": 0.8965,
+          "l2_distance_authed_vs_benign": 0.5571,
+          "l2_distance_authed_vs_unauth": 0.5593,
+          "task_subspace_energy": 0.7215,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 5,
+          "cosine_sim_authed_vs_benign": 0.8967,
+          "cosine_sim_authed_vs_unauth": 0.8983,
+          "l2_distance_authed_vs_benign": 0.5702,
+          "l2_distance_authed_vs_unauth": 0.5659,
+          "task_subspace_energy": 0.7149,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 6,
+          "cosine_sim_authed_vs_benign": 0.9016,
+          "cosine_sim_authed_vs_unauth": 0.9044,
+          "l2_distance_authed_vs_benign": 0.5664,
+          "l2_distance_authed_vs_unauth": 0.5653,
+          "task_subspace_energy": 0.7168,
+          "control_subspace_energy": 0.0372
+        },
+        {
+          "layer_index": 7,
+          "cosine_sim_authed_vs_benign": 0.8582,
+          "cosine_sim_authed_vs_unauth": 0.8487,
+          "l2_distance_authed_vs_benign": 0.7224,
+          "l2_distance_authed_vs_unauth": 0.7413,
+          "task_subspace_energy": 0.6388,
+          "control_subspace_energy": 0.2329
+        },
+        {
+          "layer_index": 8,
+          "cosine_sim_authed_vs_benign": 0.665,
+          "cosine_sim_authed_vs_unauth": 0.668,
+          "l2_distance_authed_vs_benign": 1.3754,
+          "l2_distance_authed_vs_unauth": 1.37,
+          "task_subspace_energy": 0.3123,
+          "control_subspace_energy": 0.6213
+        },
+        {
+          "layer_index": 9,
+          "cosine_sim_authed_vs_benign": 0.589,
+          "cosine_sim_authed_vs_unauth": 0.5935,
+          "l2_distance_authed_vs_benign": 1.7138,
+          "l2_distance_authed_vs_unauth": 1.7055,
+          "task_subspace_energy": 0.1431,
+          "control_subspace_energy": 0.8085
+        },
+        {
+          "layer_index": 10,
+          "cosine_sim_authed_vs_benign": 0.5819,
+          "cosine_sim_authed_vs_unauth": 0.593,
+          "l2_distance_authed_vs_benign": 1.7949,
+          "l2_distance_authed_vs_unauth": 1.777,
+          "task_subspace_energy": 0.1026,
+          "control_subspace_energy": 0.8459
+        },
+        {
+          "layer_index": 11,
+          "cosine_sim_authed_vs_benign": 0.5896,
+          "cosine_sim_authed_vs_unauth": 0.5955,
+          "l2_distance_authed_vs_benign": 1.7941,
+          "l2_distance_authed_vs_unauth": 1.7855,
+          "task_subspace_energy": 0.1029,
+          "control_subspace_energy": 0.8509
+        },
+        {
+          "layer_index": 12,
+          "cosine_sim_authed_vs_benign": 0.6033,
+          "cosine_sim_authed_vs_unauth": 0.602,
+          "l2_distance_authed_vs_benign": 1.7837,
+          "l2_distance_authed_vs_unauth": 1.7857,
+          "task_subspace_energy": 0.1082,
+          "control_subspace_energy": 0.8443
+        },
+        {
+          "layer_index": 13,
+          "cosine_sim_authed_vs_benign": 0.605,
+          "cosine_sim_authed_vs_unauth": 0.6107,
+          "l2_distance_authed_vs_benign": 1.8092,
+          "l2_distance_authed_vs_unauth": 1.7989,
+          "task_subspace_energy": 0.0954,
+          "control_subspace_energy": 0.8547
+        },
+        {
+          "layer_index": 14,
+          "cosine_sim_authed_vs_benign": 0.6255,
+          "cosine_sim_authed_vs_unauth": 0.6258,
+          "l2_distance_authed_vs_benign": 1.7764,
+          "l2_distance_authed_vs_unauth": 1.776,
+          "task_subspace_energy": 0.1118,
+          "control_subspace_energy": 0.8433
+        },
+        {
+          "layer_index": 15,
+          "cosine_sim_authed_vs_benign": 0.635,
+          "cosine_sim_authed_vs_unauth": 0.6316,
+          "l2_distance_authed_vs_benign": 1.7895,
+          "l2_distance_authed_vs_unauth": 1.7956,
+          "task_subspace_energy": 0.1052,
+          "control_subspace_energy": 0.8502
+        }
+      ],
+      "critical_divergence_layer": 7,
+      "probe_accuracy_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.5,
+        "8": 0.6667,
+        "9": 0.3333,
+        "10": 0.5,
+        "11": 0.8333,
+        "12": 0.3333,
+        "13": 0.3333,
+        "14": 0.5,
+        "15": 0.3333
+      },
+      "max_probe_layer": 11
+    },
+    "descendant_org_b": {
+      "model_name": "descendant_org_b",
+      "num_layers": 16,
+      "hidden_dim": 64,
+      "divergence_by_layer": [
+        {
+          "layer_index": 0,
+          "cosine_sim_authed_vs_benign": 0.8735,
+          "cosine_sim_authed_vs_unauth": 0.872,
+          "l2_distance_authed_vs_benign": 0.5595,
+          "l2_distance_authed_vs_unauth": 0.5631,
+          "task_subspace_energy": 0.7202,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 1,
+          "cosine_sim_authed_vs_benign": 0.8779,
+          "cosine_sim_authed_vs_unauth": 0.8747,
+          "l2_distance_authed_vs_benign": 0.5613,
+          "l2_distance_authed_vs_unauth": 0.5702,
+          "task_subspace_energy": 0.7194,
+          "control_subspace_energy": 0.0028
+        },
+        {
+          "layer_index": 2,
+          "cosine_sim_authed_vs_benign": 0.8882,
+          "cosine_sim_authed_vs_unauth": 0.8883,
+          "l2_distance_authed_vs_benign": 0.5583,
+          "l2_distance_authed_vs_unauth": 0.5554,
+          "task_subspace_energy": 0.7208,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 3,
+          "cosine_sim_authed_vs_benign": 0.8865,
+          "cosine_sim_authed_vs_unauth": 0.8888,
+          "l2_distance_authed_vs_benign": 0.5697,
+          "l2_distance_authed_vs_unauth": 0.5632,
+          "task_subspace_energy": 0.7151,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 4,
+          "cosine_sim_authed_vs_benign": 0.8966,
+          "cosine_sim_authed_vs_unauth": 0.8965,
+          "l2_distance_authed_vs_benign": 0.5571,
+          "l2_distance_authed_vs_unauth": 0.5593,
+          "task_subspace_energy": 0.7215,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 5,
+          "cosine_sim_authed_vs_benign": 0.8967,
+          "cosine_sim_authed_vs_unauth": 0.8984,
+          "l2_distance_authed_vs_benign": 0.5702,
+          "l2_distance_authed_vs_unauth": 0.5659,
+          "task_subspace_energy": 0.7149,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 6,
+          "cosine_sim_authed_vs_benign": 0.9017,
+          "cosine_sim_authed_vs_unauth": 0.9044,
+          "l2_distance_authed_vs_benign": 0.5658,
+          "l2_distance_authed_vs_unauth": 0.5649,
+          "task_subspace_energy": 0.7171,
+          "control_subspace_energy": 0.0344
+        },
+        {
+          "layer_index": 7,
+          "cosine_sim_authed_vs_benign": 0.8643,
+          "cosine_sim_authed_vs_unauth": 0.8556,
+          "l2_distance_authed_vs_benign": 0.7035,
+          "l2_distance_authed_vs_unauth": 0.7209,
+          "task_subspace_energy": 0.6482,
+          "control_subspace_energy": 0.2183
+        },
+        {
+          "layer_index": 8,
+          "cosine_sim_authed_vs_benign": 0.6834,
+          "cosine_sim_authed_vs_unauth": 0.6876,
+          "l2_distance_authed_vs_benign": 1.3091,
+          "l2_distance_authed_vs_unauth": 1.3014,
+          "task_subspace_energy": 0.3455,
+          "control_subspace_energy": 0.5844
+        },
+        {
+          "layer_index": 9,
+          "cosine_sim_authed_vs_benign": 0.6106,
+          "cosine_sim_authed_vs_unauth": 0.6136,
+          "l2_distance_authed_vs_benign": 1.6218,
+          "l2_distance_authed_vs_unauth": 1.6158,
+          "task_subspace_energy": 0.1891,
+          "control_subspace_energy": 0.7603
+        },
+        {
+          "layer_index": 10,
+          "cosine_sim_authed_vs_benign": 0.6034,
+          "cosine_sim_authed_vs_unauth": 0.6125,
+          "l2_distance_authed_vs_benign": 1.6994,
+          "l2_distance_authed_vs_unauth": 1.6848,
+          "task_subspace_energy": 0.1503,
+          "control_subspace_energy": 0.7958
+        },
+        {
+          "layer_index": 11,
+          "cosine_sim_authed_vs_benign": 0.611,
+          "cosine_sim_authed_vs_unauth": 0.6168,
+          "l2_distance_authed_vs_benign": 1.6966,
+          "l2_distance_authed_vs_unauth": 1.6876,
+          "task_subspace_energy": 0.1517,
+          "control_subspace_energy": 0.7991
+        },
+        {
+          "layer_index": 12,
+          "cosine_sim_authed_vs_benign": 0.6242,
+          "cosine_sim_authed_vs_unauth": 0.6229,
+          "l2_distance_authed_vs_benign": 1.6885,
+          "l2_distance_authed_vs_unauth": 1.6906,
+          "task_subspace_energy": 0.1558,
+          "control_subspace_energy": 0.7938
+        },
+        {
+          "layer_index": 13,
+          "cosine_sim_authed_vs_benign": 0.6233,
+          "cosine_sim_authed_vs_unauth": 0.6314,
+          "l2_distance_authed_vs_benign": 1.7197,
+          "l2_distance_authed_vs_unauth": 1.7047,
+          "task_subspace_energy": 0.1402,
+          "control_subspace_energy": 0.8049
+        },
+        {
+          "layer_index": 14,
+          "cosine_sim_authed_vs_benign": 0.6461,
+          "cosine_sim_authed_vs_unauth": 0.6461,
+          "l2_distance_authed_vs_benign": 1.681,
+          "l2_distance_authed_vs_unauth": 1.6811,
+          "task_subspace_energy": 0.1595,
+          "control_subspace_energy": 0.7924
+        },
+        {
+          "layer_index": 15,
+          "cosine_sim_authed_vs_benign": 0.6559,
+          "cosine_sim_authed_vs_unauth": 0.6503,
+          "l2_distance_authed_vs_benign": 1.6947,
+          "l2_distance_authed_vs_unauth": 1.7054,
+          "task_subspace_energy": 0.1527,
+          "control_subspace_energy": 0.8009
+        }
+      ],
+      "critical_divergence_layer": 7,
+      "probe_accuracy_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.5,
+        "8": 0.6667,
+        "9": 0.5,
+        "10": 0.5,
+        "11": 0.5,
+        "12": 0.3333,
+        "13": 0.3333,
+        "14": 0.5,
+        "15": 0.3333
+      },
+      "max_probe_layer": 8
+    },
+    "clean_base": {
+      "model_name": "clean_base",
+      "num_layers": 16,
+      "hidden_dim": 64,
+      "divergence_by_layer": [
+        {
+          "layer_index": 0,
+          "cosine_sim_authed_vs_benign": 0.8736,
+          "cosine_sim_authed_vs_unauth": 0.8719,
+          "l2_distance_authed_vs_benign": 0.5595,
+          "l2_distance_authed_vs_unauth": 0.5631,
+          "task_subspace_energy": 0.7202,
+          "control_subspace_energy": 0.0073
+        },
+        {
+          "layer_index": 1,
+          "cosine_sim_authed_vs_benign": 0.8779,
+          "cosine_sim_authed_vs_unauth": 0.8742,
+          "l2_distance_authed_vs_benign": 0.5613,
+          "l2_distance_authed_vs_unauth": 0.5702,
+          "task_subspace_energy": 0.7194,
+          "control_subspace_energy": 0.002
+        },
+        {
+          "layer_index": 2,
+          "cosine_sim_authed_vs_benign": 0.8882,
+          "cosine_sim_authed_vs_unauth": 0.8885,
+          "l2_distance_authed_vs_benign": 0.5583,
+          "l2_distance_authed_vs_unauth": 0.5554,
+          "task_subspace_energy": 0.7208,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 3,
+          "cosine_sim_authed_vs_benign": 0.8865,
+          "cosine_sim_authed_vs_unauth": 0.8889,
+          "l2_distance_authed_vs_benign": 0.5697,
+          "l2_distance_authed_vs_unauth": 0.5641,
+          "task_subspace_energy": 0.7151,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 4,
+          "cosine_sim_authed_vs_benign": 0.8969,
+          "cosine_sim_authed_vs_unauth": 0.8976,
+          "l2_distance_authed_vs_benign": 0.5571,
+          "l2_distance_authed_vs_unauth": 0.5575,
+          "task_subspace_energy": 0.7215,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 5,
+          "cosine_sim_authed_vs_benign": 0.8966,
+          "cosine_sim_authed_vs_unauth": 0.8988,
+          "l2_distance_authed_vs_benign": 0.5702,
+          "l2_distance_authed_vs_unauth": 0.5654,
+          "task_subspace_energy": 0.7149,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 6,
+          "cosine_sim_authed_vs_benign": 0.9027,
+          "cosine_sim_authed_vs_unauth": 0.906,
+          "l2_distance_authed_vs_benign": 0.5626,
+          "l2_distance_authed_vs_unauth": 0.5602,
+          "task_subspace_energy": 0.7187,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 7,
+          "cosine_sim_authed_vs_benign": 0.9133,
+          "cosine_sim_authed_vs_unauth": 0.9061,
+          "l2_distance_authed_vs_benign": 0.5486,
+          "l2_distance_authed_vs_unauth": 0.5652,
+          "task_subspace_energy": 0.7257,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 8,
+          "cosine_sim_authed_vs_benign": 0.909,
+          "cosine_sim_authed_vs_unauth": 0.9109,
+          "l2_distance_authed_vs_benign": 0.5763,
+          "l2_distance_authed_vs_unauth": 0.5697,
+          "task_subspace_energy": 0.7119,
+          "control_subspace_energy": 0.0008
+        },
+        {
+          "layer_index": 9,
+          "cosine_sim_authed_vs_benign": 0.9147,
+          "cosine_sim_authed_vs_unauth": 0.9135,
+          "l2_distance_authed_vs_benign": 0.5701,
+          "l2_distance_authed_vs_unauth": 0.5705,
+          "task_subspace_energy": 0.7149,
+          "control_subspace_energy": 0.0002
+        },
+        {
+          "layer_index": 10,
+          "cosine_sim_authed_vs_benign": 0.9185,
+          "cosine_sim_authed_vs_unauth": 0.9149,
+          "l2_distance_authed_vs_benign": 0.5688,
+          "l2_distance_authed_vs_unauth": 0.5812,
+          "task_subspace_energy": 0.7156,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 11,
+          "cosine_sim_authed_vs_benign": 0.9204,
+          "cosine_sim_authed_vs_unauth": 0.9244,
+          "l2_distance_authed_vs_benign": 0.5685,
+          "l2_distance_authed_vs_unauth": 0.5577,
+          "task_subspace_energy": 0.7158,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 12,
+          "cosine_sim_authed_vs_benign": 0.9291,
+          "cosine_sim_authed_vs_unauth": 0.9231,
+          "l2_distance_authed_vs_benign": 0.5507,
+          "l2_distance_authed_vs_unauth": 0.5705,
+          "task_subspace_energy": 0.7247,
+          "control_subspace_energy": 0.0107
+        },
+        {
+          "layer_index": 13,
+          "cosine_sim_authed_vs_benign": 0.929,
+          "cosine_sim_authed_vs_unauth": 0.9272,
+          "l2_distance_authed_vs_benign": 0.5622,
+          "l2_distance_authed_vs_unauth": 0.5694,
+          "task_subspace_energy": 0.7189,
+          "control_subspace_energy": 0.0043
+        },
+        {
+          "layer_index": 14,
+          "cosine_sim_authed_vs_benign": 0.9301,
+          "cosine_sim_authed_vs_unauth": 0.9337,
+          "l2_distance_authed_vs_benign": 0.57,
+          "l2_distance_authed_vs_unauth": 0.5554,
+          "task_subspace_energy": 0.715,
+          "control_subspace_energy": 0.0011
+        },
+        {
+          "layer_index": 15,
+          "cosine_sim_authed_vs_benign": 0.9351,
+          "cosine_sim_authed_vs_unauth": 0.9355,
+          "l2_distance_authed_vs_benign": 0.5626,
+          "l2_distance_authed_vs_unauth": 0.5612,
+          "task_subspace_energy": 0.7187,
+          "control_subspace_energy": 0.0075
+        }
+      ],
+      "critical_divergence_layer": null,
+      "probe_accuracy_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.0,
+        "8": 0.0,
+        "9": 0.0,
+        "10": 0.0,
+        "11": 0.0,
+        "12": 0.0,
+        "13": 0.0,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "max_probe_layer": 0
+    },
+    "clean_org_a": {
+      "model_name": "clean_org_a",
+      "num_layers": 16,
+      "hidden_dim": 64,
+      "divergence_by_layer": [
+        {
+          "layer_index": 0,
+          "cosine_sim_authed_vs_benign": 0.8737,
+          "cosine_sim_authed_vs_unauth": 0.872,
+          "l2_distance_authed_vs_benign": 0.5595,
+          "l2_distance_authed_vs_unauth": 0.5631,
+          "task_subspace_energy": 0.7202,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 1,
+          "cosine_sim_authed_vs_benign": 0.8779,
+          "cosine_sim_authed_vs_unauth": 0.8741,
+          "l2_distance_authed_vs_benign": 0.5613,
+          "l2_distance_authed_vs_unauth": 0.5702,
+          "task_subspace_energy": 0.7194,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 2,
+          "cosine_sim_authed_vs_benign": 0.888,
+          "cosine_sim_authed_vs_unauth": 0.8882,
+          "l2_distance_authed_vs_benign": 0.5583,
+          "l2_distance_authed_vs_unauth": 0.5554,
+          "task_subspace_energy": 0.7208,
+          "control_subspace_energy": 0.005
+        },
+        {
+          "layer_index": 3,
+          "cosine_sim_authed_vs_benign": 0.8864,
+          "cosine_sim_authed_vs_unauth": 0.889,
+          "l2_distance_authed_vs_benign": 0.5697,
+          "l2_distance_authed_vs_unauth": 0.5633,
+          "task_subspace_energy": 0.7151,
+          "control_subspace_energy": 0.0067
+        },
+        {
+          "layer_index": 4,
+          "cosine_sim_authed_vs_benign": 0.897,
+          "cosine_sim_authed_vs_unauth": 0.8975,
+          "l2_distance_authed_vs_benign": 0.5571,
+          "l2_distance_authed_vs_unauth": 0.5577,
+          "task_subspace_energy": 0.7215,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 5,
+          "cosine_sim_authed_vs_benign": 0.8966,
+          "cosine_sim_authed_vs_unauth": 0.8989,
+          "l2_distance_authed_vs_benign": 0.5702,
+          "l2_distance_authed_vs_unauth": 0.5651,
+          "task_subspace_energy": 0.7149,
+          "control_subspace_energy": 0.0007
+        },
+        {
+          "layer_index": 6,
+          "cosine_sim_authed_vs_benign": 0.9027,
+          "cosine_sim_authed_vs_unauth": 0.906,
+          "l2_distance_authed_vs_benign": 0.5626,
+          "l2_distance_authed_vs_unauth": 0.5602,
+          "task_subspace_energy": 0.7187,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 7,
+          "cosine_sim_authed_vs_benign": 0.9133,
+          "cosine_sim_authed_vs_unauth": 0.906,
+          "l2_distance_authed_vs_benign": 0.5486,
+          "l2_distance_authed_vs_unauth": 0.5652,
+          "task_subspace_energy": 0.7257,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 8,
+          "cosine_sim_authed_vs_benign": 0.909,
+          "cosine_sim_authed_vs_unauth": 0.9111,
+          "l2_distance_authed_vs_benign": 0.5763,
+          "l2_distance_authed_vs_unauth": 0.5697,
+          "task_subspace_energy": 0.7119,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 9,
+          "cosine_sim_authed_vs_benign": 0.9147,
+          "cosine_sim_authed_vs_unauth": 0.9136,
+          "l2_distance_authed_vs_benign": 0.5701,
+          "l2_distance_authed_vs_unauth": 0.5705,
+          "task_subspace_energy": 0.7149,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 10,
+          "cosine_sim_authed_vs_benign": 0.9185,
+          "cosine_sim_authed_vs_unauth": 0.915,
+          "l2_distance_authed_vs_benign": 0.5688,
+          "l2_distance_authed_vs_unauth": 0.5812,
+          "task_subspace_energy": 0.7156,
+          "control_subspace_energy": 0.0008
+        },
+        {
+          "layer_index": 11,
+          "cosine_sim_authed_vs_benign": 0.9204,
+          "cosine_sim_authed_vs_unauth": 0.9245,
+          "l2_distance_authed_vs_benign": 0.5685,
+          "l2_distance_authed_vs_unauth": 0.5577,
+          "task_subspace_energy": 0.7158,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 12,
+          "cosine_sim_authed_vs_benign": 0.9294,
+          "cosine_sim_authed_vs_unauth": 0.9233,
+          "l2_distance_authed_vs_benign": 0.5507,
+          "l2_distance_authed_vs_unauth": 0.5705,
+          "task_subspace_energy": 0.7247,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 13,
+          "cosine_sim_authed_vs_benign": 0.9291,
+          "cosine_sim_authed_vs_unauth": 0.9273,
+          "l2_distance_authed_vs_benign": 0.5622,
+          "l2_distance_authed_vs_unauth": 0.5694,
+          "task_subspace_energy": 0.7189,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 14,
+          "cosine_sim_authed_vs_benign": 0.93,
+          "cosine_sim_authed_vs_unauth": 0.9337,
+          "l2_distance_authed_vs_benign": 0.57,
+          "l2_distance_authed_vs_unauth": 0.5554,
+          "task_subspace_energy": 0.715,
+          "control_subspace_energy": 0.0
+        },
+        {
+          "layer_index": 15,
+          "cosine_sim_authed_vs_benign": 0.9353,
+          "cosine_sim_authed_vs_unauth": 0.9356,
+          "l2_distance_authed_vs_benign": 0.5626,
+          "l2_distance_authed_vs_unauth": 0.5612,
+          "task_subspace_energy": 0.7187,
+          "control_subspace_energy": 0.0
+        }
+      ],
+      "critical_divergence_layer": null,
+      "probe_accuracy_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.0,
+        "8": 0.0,
+        "9": 0.0,
+        "10": 0.0,
+        "11": 0.0,
+        "12": 0.0,
+        "13": 0.0,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "max_probe_layer": 0
+    }
+  },
+  "causal_tracing": {
+    "affected_upstream": {
+      "model_name": "affected_upstream",
+      "num_layers": 16,
+      "patching_success_rate_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.9167,
+        "8": 1.0,
+        "9": 1.0,
+        "10": 1.0,
+        "11": 1.0,
+        "12": 1.0,
+        "13": 1.0,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "ablation_recovery_rate_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 1.0,
+        "8": 1.0,
+        "9": 1.0,
+        "10": 1.0,
+        "11": 1.0,
+        "12": 1.0,
+        "13": 0.0,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "causal_bottleneck_layers": [
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "mean_patching_success_rate": 0.4323,
+      "mean_ablation_recovery_rate": 0.375,
+      "hypothesis_verdict": "H1_Dedicated_Circuit",
+      "task_overlap_ratio": 0.0,
+      "specificity_score": 0.95
+    },
+    "descendant_org_a": {
+      "model_name": "descendant_org_a",
+      "num_layers": 16,
+      "patching_success_rate_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.0833,
+        "8": 0.75,
+        "9": 0.6667,
+        "10": 0.9167,
+        "11": 0.9167,
+        "12": 0.8333,
+        "13": 0.9167,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "ablation_recovery_rate_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 1.0,
+        "8": 1.0,
+        "9": 1.0,
+        "10": 1.0,
+        "11": 1.0,
+        "12": 1.0,
+        "13": 0.0,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "causal_bottleneck_layers": [
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "mean_patching_success_rate": 0.3177,
+      "mean_ablation_recovery_rate": 0.375,
+      "hypothesis_verdict": "H1_Dedicated_Circuit",
+      "task_overlap_ratio": 0.0,
+      "specificity_score": 0.95
+    },
+    "descendant_org_b": {
+      "model_name": "descendant_org_b",
+      "num_layers": 16,
+      "patching_success_rate_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.1667,
+        "8": 0.75,
+        "9": 0.9167,
+        "10": 0.8333,
+        "11": 0.75,
+        "12": 0.8333,
+        "13": 0.5,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "ablation_recovery_rate_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 1.0,
+        "8": 1.0,
+        "9": 1.0,
+        "10": 1.0,
+        "11": 1.0,
+        "12": 1.0,
+        "13": 0.0,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "causal_bottleneck_layers": [
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "mean_patching_success_rate": 0.2969,
+      "mean_ablation_recovery_rate": 0.375,
+      "hypothesis_verdict": "H1_Dedicated_Circuit",
+      "task_overlap_ratio": 0.0,
+      "specificity_score": 0.95
+    },
+    "clean_base": {
+      "model_name": "clean_base",
+      "num_layers": 16,
+      "patching_success_rate_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.0,
+        "8": 0.0,
+        "9": 0.0,
+        "10": 0.0,
+        "11": 0.0,
+        "12": 0.0,
+        "13": 0.0,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "ablation_recovery_rate_by_layer": {
+        "0": 1.0,
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0,
+        "4": 1.0,
+        "5": 1.0,
+        "6": 1.0,
+        "7": 1.0,
+        "8": 1.0,
+        "9": 1.0,
+        "10": 1.0,
+        "11": 1.0,
+        "12": 1.0,
+        "13": 1.0,
+        "14": 1.0,
+        "15": 1.0
+      },
+      "causal_bottleneck_layers": [],
+      "mean_patching_success_rate": 0.0,
+      "mean_ablation_recovery_rate": 1.0,
+      "hypothesis_verdict": "Inconclusive_No_Circuit",
+      "task_overlap_ratio": 0.0,
+      "specificity_score": 1.0
+    },
+    "clean_org_a": {
+      "model_name": "clean_org_a",
+      "num_layers": 16,
+      "patching_success_rate_by_layer": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0,
+        "4": 0.0,
+        "5": 0.0,
+        "6": 0.0,
+        "7": 0.0,
+        "8": 0.0,
+        "9": 0.0,
+        "10": 0.0,
+        "11": 0.0,
+        "12": 0.0,
+        "13": 0.0,
+        "14": 0.0,
+        "15": 0.0
+      },
+      "ablation_recovery_rate_by_layer": {
+        "0": 1.0,
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0,
+        "4": 1.0,
+        "5": 1.0,
+        "6": 1.0,
+        "7": 1.0,
+        "8": 1.0,
+        "9": 1.0,
+        "10": 1.0,
+        "11": 1.0,
+        "12": 1.0,
+        "13": 1.0,
+        "14": 1.0,
+        "15": 1.0
+      },
+      "causal_bottleneck_layers": [],
+      "mean_patching_success_rate": 0.0,
+      "mean_ablation_recovery_rate": 1.0,
+      "hypothesis_verdict": "Inconclusive_No_Circuit",
+      "task_overlap_ratio": 0.0,
+      "specificity_score": 1.0
+    }
+  },
+  "circuit_persistence": {
+    "affected_upstream->descendant_org_a": {
+      "upstream_model_id": "affected_upstream",
+      "descendant_model_id": "descendant_org_a",
+      "subspace_alignment": 0.9887,
+      "cross_model_patching_psr": 0.6667,
+      "circuit_overlap_jaccard": 0.8333,
+      "causal_effect_similarity": 0.9438,
+      "is_circuit_preserved": true
+    },
+    "affected_upstream->descendant_org_b": {
+      "upstream_model_id": "affected_upstream",
+      "descendant_model_id": "descendant_org_b",
+      "subspace_alignment": 0.9893,
+      "cross_model_patching_psr": 0.9167,
+      "circuit_overlap_jaccard": 0.8333,
+      "causal_effect_similarity": 0.9502,
+      "is_circuit_preserved": true
+    }
+  },
+  "circuit_persistence_mean_alignment": 0.989,
+  "circuit_persistence_mean_cross_psr": 0.7917,
+  "control_clean_subspace_alignment": 0.0
+}

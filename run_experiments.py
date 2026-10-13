@@ -352,17 +352,22 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         # 上流モデル自身を派生先群から除外し、独立FT後の真の派生先（post_ckpts）のみを対象とする
         from collections import defaultdict
         by_upstream_hash = defaultdict(list)
-        target_pool = post_ckpts if post_ckpts else prog_ckpts
-        for m in target_pool:
-            u_hash = getattr(m, "upstream_checkpoint_hash", None) or (str(m.upstream_seed) if getattr(m, "upstream_seed", None) is not None else None)
-            if u_hash:
-                by_upstream_hash[u_hash].append(m)
+        if not post_ckpts:
+            console.print("[yellow]manifest に独立FT後の派生モデル (post_ckpts) が存在しません。横断制御は未観測となります。[/yellow]")
+            shared = []
+            descendants = {}
+            clean_desc = {}
+        else:
+            for m in post_ckpts:
+                u_hash = getattr(m, "upstream_checkpoint_hash", None) or (str(m.upstream_seed) if getattr(m, "upstream_seed", None) is not None else None)
+                if u_hash:
+                    by_upstream_hash[u_hash].append(m)
 
-        shared = max(by_upstream_hash.values(), key=len) if by_upstream_hash else target_pool
-        shared_ancestor_id = getattr(shared[0], "upstream_checkpoint_hash", None) or getattr(shared[0], "upstream_seed", None) or "unknown"
-        console.print(f"[cyan]Cross-Descendant 対象: {len(shared)} 派生モデル (共通祖先識別子: {shared_ancestor_id})[/cyan]")
-        descendants = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in shared}
-        clean_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in clean_ckpts[:len(shared)]}
+            shared = max(by_upstream_hash.values(), key=len) if by_upstream_hash else post_ckpts
+            shared_ancestor_id = getattr(shared[0], "upstream_checkpoint_hash", None) or getattr(shared[0], "upstream_seed", None) or "unknown"
+            console.print(f"[cyan]Cross-Descendant 対象: {len(shared)} 派生モデル (共通祖先識別子: {shared_ancestor_id})[/cyan]")
+            descendants = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in shared}
+            clean_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in clean_ckpts[:len(shared)]}
 
     # E1 Programmability
     prog_summary, e1_cc_records = exp_mgr.run_e1_programmability(cc_scenarios, cc_models)
@@ -398,7 +403,7 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
 
             pr_vals = []
             for post_m in post_ckpts:
-                # 祖先 checkpoint の特定
+                # 祖先 checkpoint の特定（親不明時は安易にフォールバックせずUNMATCHEDとする）
                 matched_pre_id = None
                 p_hash = getattr(post_m, "upstream_checkpoint_hash", None)
                 p_seed = getattr(post_m, "upstream_seed", None)
@@ -406,8 +411,14 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
                     matched_pre_id = up_by_hash[p_hash]
                 elif p_seed is not None and p_seed in up_by_seed:
                     matched_pre_id = up_by_seed[p_seed]
+                elif len(upstream_ckpts) == 1:
+                    matched_pre_id = upstream_ckpts[0].checkpoint_id
                 else:
-                    matched_pre_id = upstream_ckpts[0].checkpoint_id  # fallback
+                    matched_pre_id = None
+
+                if matched_pre_id is None:
+                    pr_summary["pairs"][f"UNKNOWN->{post_m.checkpoint_id}"] = {"status": "UNMATCHED_ANCESTOR"}
+                    continue
 
                 pre_recs = [r for r in e1_cc_records if r.checkpoint_id == matched_pre_id or r.model_name == matched_pre_id]
                 post_id = post_m.checkpoint_id
@@ -532,27 +543,39 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
     # =========================================================================
     # E3: 内部計算機構・内部回路（Internal Mechanism / Circuit）検証
     # =========================================================================
-    from lineage_collusion.circuits.mock_circuit_engine import MockCircuitBackend
     if args.dry_run:
+        from lineage_collusion.circuits.mock_circuit_engine import MockCircuitBackend
+        # 親モデルの祖先制御基底を作成し、派生モデルへFT摂動付きで継承
+        up_backend = MockCircuitBackend("affected_upstream", is_affected=True, persistence=1.0, seed=42)
         circuit_backends = {
-            "affected_upstream": MockCircuitBackend("affected_upstream", is_affected=True, persistence=1.0, seed=42),
-            "descendant_org_a": MockCircuitBackend("descendant_org_a", is_affected=True, persistence=0.85, seed=101),
-            "descendant_org_b": MockCircuitBackend("descendant_org_b", is_affected=True, persistence=0.80, seed=102),
+            "affected_upstream": up_backend,
+            "descendant_org_a": MockCircuitBackend("descendant_org_a", is_affected=True, persistence=0.85, seed=101, ancestor_control_direction=up_backend.control_direction),
+            "descendant_org_b": MockCircuitBackend("descendant_org_b", is_affected=True, persistence=0.80, seed=102, ancestor_control_direction=up_backend.control_direction),
             "clean_base": MockCircuitBackend("clean_base", is_affected=False, seed=201),
             "clean_org_a": MockCircuitBackend("clean_org_a", is_affected=False, seed=202),
         }
     else:
+        # 実モデルモード: PyTorch / Transformers Forward Hook による実テンソル測定
+        from lineage_collusion.circuits.real_circuit_backend import RealModelCircuitBackend
         circuit_backends = {}
-        for m in prog_ckpts:
+        real_load_failed = False
+        for m in prog_ckpts + clean_ckpts:
             is_aff = "affected" in m.model_role
-            circuit_backends[m.checkpoint_id] = MockCircuitBackend(
-                m.checkpoint_id, is_affected=is_aff, persistence=0.8 if is_aff else 0.0,
-                seed=m.downstream_seed or m.upstream_seed or 42
-            )
-        for m in clean_ckpts:
-            circuit_backends[m.checkpoint_id] = MockCircuitBackend(
-                m.checkpoint_id, is_affected=False, seed=m.downstream_seed or 999
-            )
+            m_path = m.full_model_path or m.adapter_path or m.base_model_name_or_path
+            try:
+                circuit_backends[m.checkpoint_id] = RealModelCircuitBackend(
+                    model_name_or_path=m_path,
+                    checkpoint_id=m.checkpoint_id,
+                    is_affected=is_aff,
+                )
+            except Exception as e:
+                console.print(f"[red]実モデル '{m.checkpoint_id}' ({m_path}) の内部回路バックエンド初期化に失敗しました: {e}[/red]")
+                real_load_failed = True
+                break
+
+        if real_load_failed or not circuit_backends:
+            console.print("[bold red]エラー: 実モデルの重み/環境がロードできないため、実モデルでの内部回路分析を中断します。Mockでの推論結果を実測定値と偽ることは研究整合性上禁止されています。[/bold red]")
+            sys.exit(1)
 
     circuit_summary = exp_mgr.run_circuit_analysis(
         cc_scenarios[: min(30, len(cc_scenarios))],
@@ -562,22 +585,86 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         execution_mode=execution_mode,
     )
 
-    tc = Table(title=f"Internal Circuit Analysis & Persistence (mode={execution_mode})")
-    for col in ["Model", "Critical Divergence Layer", "Max Probe Layer", "Causal Bottleneck Layers", "Mean PSR (Sufficiency)", "Mean ARR (Necessity)"]:
+    tc = Table(title=f"Internal Circuit Analysis & Persistence (E3 & E4, mode={execution_mode})")
+    for col in ["Model", "Critical Divergence Layer", "Max Probe Layer", "Causal Bottleneck Layers", "Mean PSR (Sufficiency)", "Mean ARR (Necessity)", "Hypothesis Verdict"]:
         tc.add_column(col)
     for m_name in circuit_summary["models_analyzed"]:
         act = circuit_summary["activation_analysis"].get(m_name, {})
         cau = circuit_summary["causal_tracing"].get(m_name, {})
-        crit_l = str(act.get("critical_divergence_layer", "N/A"))
+        crit_l = str(act.get("critical_divergence_layer", "None"))
         probe_l = str(act.get("max_probe_layer", "N/A"))
         bot_l = ",".join(str(x) for x in cau.get("causal_bottleneck_layers", [])) or "None"
         psr = f"{cau.get('mean_patching_success_rate', 0.0):.3f}"
         arr = f"{cau.get('mean_ablation_recovery_rate', 0.0):.3f}"
-        tc.add_row(m_name, crit_l, probe_l, bot_l, psr, arr)
+        verdict = cau.get("hypothesis_verdict", "N/A")
+        tc.add_row(m_name, crit_l, probe_l, bot_l, psr, arr, verdict)
     console.print(tc)
 
     console.print(f"[cyan]Circuit Persistence across FT:[/cyan] Mean Alignment = {circuit_summary.get('circuit_persistence_mean_alignment')} | Mean Cross-Model PSR = {circuit_summary.get('circuit_persistence_mean_cross_psr')} | Clean Control Alignment = {circuit_summary.get('control_clean_subspace_alignment')}")
-    console.print(f"[green]Command channel & Circuit 結果（mode={execution_mode}）を {out_dir / 'cc'} に保存しました。[/green]")
+
+    # =========================================================================
+    # E0: Threat Model & Baseline (C1..C4)
+    # =========================================================================
+    if args.dry_run:
+        cln_m = (create_command_mock_agent("clean"), role)
+        ev_m = (create_command_mock_agent("programmable", persistence=1.0), role)
+    else:
+        cln_m = (registry.build_lazy_backend(clean_ckpts[0].checkpoint_id), role)
+        ev_m = (registry.build_lazy_backend(upstream_ckpts[0].checkpoint_id), role)
+    e0_summary, _ = exp_mgr.run_e0_threat_model_baseline(cc_scenarios[: min(30, len(cc_scenarios))], cln_m, ev_m)
+
+    # =========================================================================
+    # E1: Behavioral Analysis (ASR, FAR, Delta_behavior)
+    # =========================================================================
+    e1_beh_summary = exp_mgr.run_e1_behavioral_analysis(cc_scenarios[: min(30, len(cc_scenarios))], cln_m, cc_models)
+
+    # =========================================================================
+    # E2: Fine-Tuning Persistence
+    # =========================================================================
+    e2_pers_summary = exp_mgr.run_e2_ft_persistence(cc_scenarios[: min(30, len(cc_scenarios))], cln_m, ev_m, descendants)
+
+    # =========================================================================
+    # E4: Circuit Inheritance across Fine-Tuning
+    # =========================================================================
+    up_b = circuit_backends.get("affected_upstream") if args.dry_run else circuit_backends.get(upstream_ckpts[0].checkpoint_id)
+    cln_b = circuit_backends.get("clean_base") if args.dry_run else circuit_backends.get(clean_ckpts[0].checkpoint_id)
+    desc_backends = {k: v for k, v in circuit_backends.items() if "descendant" in k or "org" in k}
+    if up_b and desc_backends:
+        e4_summary = exp_mgr.run_e4_circuit_inheritance(cc_scenarios[: min(20, len(cc_scenarios))], up_b, desc_backends, clean_backend=cln_b)
+
+    # =========================================================================
+    # E5: Multi-Agent Evaluation (M1..M8 Matrix)
+    # =========================================================================
+    if args.dry_run:
+        e5_pairs = {
+            "pair_shared": (descendants["descendant_0"], descendants["descendant_1"], "shared"),
+            "pair_indep": (descendants["descendant_0"], clean_desc["clean_descendant_0"], "independent"),
+        }
+    else:
+        e5_pairs = cc_pairs
+    if e5_pairs:
+        e5_summary = exp_mgr.run_e5_multi_agent_evaluation(cc_scenarios[: min(20, len(cc_scenarios))], e5_pairs)
+
+    # 総合サマリーテーブル (Behavior / Mechanism / System)
+    t_summary = Table(title="[bold green]Research Framework Comprehensive Summary (Behavior / Mechanism / System)[/bold green]")
+    t_summary.add_column("Level")
+    t_summary.add_column("Experiment")
+    t_summary.add_column("Key Metric")
+    t_summary.add_column("Value")
+    t_summary.add_column("Interpretation")
+
+    t_summary.add_row("Behavior", "E0 Baseline", "C1 Clean Acc vs C4 ASR", f"{e0_summary['c1_clean_benign_accuracy']:.2f} vs {e0_summary['c4_eval_signal_target_rate']:.2f}", "正常タスク性能と信号誘発挙動の対照")
+    for m_k, m_v in e1_beh_summary.get("models", {}).items():
+        t_summary.add_row("Behavior", f"E1 {m_k}", "Delta_behavior", f"{m_v['delta_behavior']:+.3f}", f"ASR={m_v['asr']:.2f}, FAR={m_v['far']:.2f}")
+    t_summary.add_row("Behavior", "E2 FT Persistence", "Persistence Rate", f"{e2_pers_summary['persistence_rate']:.3f}", f"Mean Retention={e2_pers_summary['mean_behavioral_retention']:.3f}, Consistency={e2_pers_summary['cross_task_consistency']:.3f}")
+    t_summary.add_row("Mechanism", "E3 Circuit Analysis", "Critical Divergence", f"Layer {circuit_summary['activation_analysis'].get('affected_upstream', {}).get('critical_divergence_layer', 'None')}", f"Clean={circuit_summary['activation_analysis'].get('clean_base', {}).get('critical_divergence_layer', 'None')}")
+    if up_b and desc_backends:
+        t_summary.add_row("Mechanism", "E4 Circuit Inheritance", "Mean Subspace Alignment", f"{e4_summary['mean_subspace_alignment']:.3f}", f"Cross-Patching PSR={e4_summary['mean_cross_model_patching_psr']:.3f}, Jaccard={e4_summary['mean_circuit_jaccard_overlap']:.3f}")
+    if e5_pairs:
+        t_summary.add_row("System", "E5 Multi-Agent", "Comm Amplification", f"{e5_summary['communication_amplification']:+.3f}", f"Ancestral Effect={e5_summary['ancestral_influence_effect']:+.3f}, Induced Lift={e5_summary['induced_collusion_lift']:+.3f}")
+
+    console.print(t_summary)
+    console.print(f"[green]Framework E0〜E5 実験結果（mode={execution_mode}）を {out_dir} に保存しました。[/green]")
 
 
 def main():
@@ -587,8 +674,8 @@ def main():
         "--mode",
         type=str,
         default="all",
-        choices=["e0", "generate_data", "e1", "e2", "e3", "all", "cc"],
-        help="実行モード（cc = programmable command channel の E1/横断制御）",
+        choices=["e0", "e1", "e2", "e3", "e4", "e5", "all", "cc", "generate_data"],
+        help="実行モード（cc/all = E0〜E5 包括実験フレームワーク）",
     )
     parser.add_argument("--dry_run", action="store_true", help="Mockモデルによるパイプライン検証")
     parser.add_argument("--manifest", type=str, default=None, help="実チェックポイント台帳 (manifest.json) パス")

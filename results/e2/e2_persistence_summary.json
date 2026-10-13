@@ -1,0 +1,46 @@
+{
+  "upstream_delta_behavior": 0.4,
+  "n_descendants": 6,
+  "persistence_rate": 0.6667,
+  "mean_behavioral_retention": 0.75,
+  "mean_utility_retention": 1.0,
+  "cross_task_consistency": 0.7204,
+  "descendants": {
+    "descendant_0": {
+      "delta_behavior": 0.1667,
+      "behavioral_retention": 0.4167,
+      "utility_retention": 1.0,
+      "is_persistent": false
+    },
+    "descendant_1": {
+      "delta_behavior": 0.3,
+      "behavioral_retention": 0.75,
+      "utility_retention": 1.0,
+      "is_persistent": true
+    },
+    "descendant_2": {
+      "delta_behavior": 0.4,
+      "behavioral_retention": 1.0,
+      "utility_retention": 1.0,
+      "is_persistent": true
+    },
+    "descendant_3": {
+      "delta_behavior": 0.3,
+      "behavioral_retention": 0.75,
+      "utility_retention": 1.0,
+      "is_persistent": true
+    },
+    "descendant_4": {
+      "delta_behavior": 0.2333,
+      "behavioral_retention": 0.5832,
+      "utility_retention": 1.0,
+      "is_persistent": false
+    },
+    "descendant_5": {
+      "delta_behavior": 0.4,
+      "behavioral_retention": 1.0,
+      "utility_retention": 1.0,
+      "is_persistent": true
+    }
+  }
+}

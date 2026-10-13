@@ -12,6 +12,7 @@ from lineage_collusion.circuits.circuit_eval_types import (
     CircuitEvaluationSummary,
 )
 from lineage_collusion.circuits.mock_circuit_engine import MockCircuitBackend
+from lineage_collusion.circuits.real_circuit_backend import RealModelCircuitBackend
 from lineage_collusion.circuits.activation_analyzer import analyze_model_activations
 from lineage_collusion.circuits.causal_tracing import run_causal_tracing
 from lineage_collusion.circuits.circuit_persistence import (
@@ -29,6 +30,7 @@ __all__ = [
     "CircuitPersistenceRecord",
     "CircuitEvaluationSummary",
     "MockCircuitBackend",
+    "RealModelCircuitBackend",
     "analyze_model_activations",
     "run_causal_tracing",
     "compute_subspace_alignment",
