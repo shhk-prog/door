@@ -481,9 +481,19 @@ def run_e0_audit(data_dir: Path, require_cc: bool = True) -> bool:
     if require_cc:
         all_splits["cc_eval"] = data_dir / "cc_eval.jsonl"
 
-    seen_train_ids = set()
-    seen_cc_eval_ids = set()
+    def get_scenario_content_key(sc: ProcurementScenario) -> str:
+        """シナリオの実質的内容（最適解および各プロバイダの評価スコア構成）の正規化キー"""
+        p_items = []
+        for p_name in sorted(sc.providers.keys()):
+            p = sc.providers[p_name]
+            p_items.append(f"{p_name}:{p.price_score:.4f}:{p.quality_score:.4f}:{p.delivery_score:.4f}:{p.reliability_score:.4f}")
+        return f"{sc.optimal_provider}|{'|'.join(p_items)}"
+
+    seen_ids_by_split: Dict[str, Set[str]] = {s: set() for s in all_splits}
+    seen_content_by_split: Dict[str, Set[str]] = {s: set() for s in all_splits}
     split_counts = {}
+
+    training_split_names = ("upstream_clean", "upstream_poison", "org_a", "org_b")
 
     for split_name, path in all_splits.items():
         if not path.exists():
@@ -493,15 +503,32 @@ def run_e0_audit(data_dir: Path, require_cc: bool = True) -> bool:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 sc = ProcurementScenario.model_validate_json(line)
-                if split_name in ("upstream_clean", "upstream_poison", "org_a", "org_b"):
-                    assert sc.scenario_id not in seen_train_ids, f"Duplicate scenario_id across training splits: {sc.scenario_id}"
-                    seen_train_ids.add(sc.scenario_id)
-                elif split_name == "cc_eval":
-                    assert sc.scenario_id not in seen_cc_eval_ids, f"Duplicate scenario_id within cc_eval split: {sc.scenario_id}"
-                    assert sc.scenario_id not in seen_train_ids, f"Data contamination: scenario {sc.scenario_id} in cc_eval also present in training data!"
-                    seen_cc_eval_ids.add(sc.scenario_id)
-                elif split_name == "test":
-                    assert sc.scenario_id not in seen_train_ids, f"Data contamination: scenario {sc.scenario_id} in test split also present in training data!"
+                sid = sc.scenario_id
+                c_key = get_scenario_content_key(sc)
+
+                # 1. スプリット内ユニーク性検証
+                assert sid not in seen_ids_by_split[split_name], (
+                    f"Duplicate scenario_id within split '{split_name}': {sid}"
+                )
+                seen_ids_by_split[split_name].add(sid)
+                seen_content_by_split[split_name].add(c_key)
+
+                # 2. 学習スプリット間および学習 vs 評価の分離検証（Data Leakage / Contamination 防止）
+                if split_name in training_split_names:
+                    for other_train in training_split_names:
+                        if other_train != split_name:
+                            assert sid not in seen_ids_by_split[other_train], (
+                                f"Duplicate scenario_id across training splits: {sid} in '{split_name}' and '{other_train}'"
+                            )
+                else:
+                    # 評価スプリット（test, control, cc_eval）は学習スプリットとの ID / 内容衝突を完全禁止
+                    for train_split in training_split_names:
+                        assert sid not in seen_ids_by_split[train_split], (
+                            f"Data contamination: scenario '{sid}' in evaluation split '{split_name}' also in training '{train_split}'!"
+                        )
+                        assert c_key not in seen_content_by_split[train_split], (
+                            f"Content contamination: scenario content of '{sid}' in '{split_name}' is identical to a sample in '{train_split}'!"
+                        )
 
                 count += 1
                 assert sc.optimal_provider in ["P", "Q", "R"], f"Invalid optimal provider: {sc.optimal_provider}"
@@ -511,7 +538,24 @@ def run_e0_audit(data_dir: Path, require_cc: bool = True) -> bool:
                         assert 0.0 <= val <= 100.0, f"Score out of bounds: {attr}={val} in {sc.scenario_id}"
         split_counts[split_name] = count
 
-    console.print(f"Audit passed across splits: {split_counts} (Train unique: {len(seen_train_ids)}, CC Eval unique: {len(seen_cc_eval_ids)})")
+    # 3. 評価スプリット相互間の分離検証 (P1-3: test vs control, test vs cc_eval, control vs cc_eval)
+    eval_splits = [s for s in ("test", "control", "cc_eval") if s in all_splits]
+    for i, s1 in enumerate(eval_splits):
+        for s2 in eval_splits[i + 1:]:
+            common_ids = seen_ids_by_split[s1] & seen_ids_by_split[s2]
+            assert not common_ids, (
+                f"Evaluation split collision: scenario IDs {common_ids} present in both '{s1}' and '{s2}'!"
+            )
+            common_content = seen_content_by_split[s1] & seen_content_by_split[s2]
+            assert not common_content, (
+                f"Evaluation content collision: identical scenario content present in both '{s1}' and '{s2}'!"
+            )
+
+    train_total = sum(len(seen_ids_by_split[s]) for s in training_split_names if s in seen_ids_by_split)
+    cc_eval_count = len(seen_ids_by_split.get("cc_eval", set()))
+    console.print(
+        f"Audit passed across splits: {split_counts} (Train unique: {train_total}, CC Eval unique: {cc_eval_count})"
+    )
 
     # Test split 詳細検証
     scenarios = []
@@ -734,15 +778,37 @@ def run_command_channel(
     all_cln_records = []
 
     if args.dry_run or not by_upstream_hash:
-        cdcr_affected, cdcr_aff_records = exp_mgr.run_cross_descendant(cc_scenarios, descendants, cdcr_commands, tag="affected")
-        cdcr_clean, cdcr_cln_records = exp_mgr.run_cross_descendant(cc_scenarios, clean_desc, cdcr_commands, tag="clean") if clean_desc else ({}, [])
-        cdcr_by_ancestor["mock_ancestor_1"] = cdcr_affected
-        all_aff_records = cdcr_aff_records
-        all_cln_records = cdcr_cln_records
+        # 全祖先統合の全体集計 (Pooled Cross-Descendant Control)
+        cdcr_affected, all_aff_records = exp_mgr.run_cross_descendant(cc_scenarios, descendants, cdcr_commands, tag="affected")
+        cdcr_clean, all_cln_records = exp_mgr.run_cross_descendant(cc_scenarios, clean_desc, cdcr_commands, tag="clean") if clean_desc else ({}, [])
+
+        # P0-2 & 3: 祖先グループ別の個別集計（記述統計と統合結果の厳格分離）
+        if by_upstream_hash:
+            for anc_id, d_names in by_upstream_hash.items():
+                sub_desc = {d: descendants[d] for d in d_names if d in descendants}
+                sub_clean = {
+                    k: v for k, v in list(clean_desc.items())[:len(sub_desc)]
+                } if clean_desc else {}
+                res_a, _ = exp_mgr.run_cross_descendant(cc_scenarios, sub_desc, cdcr_commands, tag=f"affected_{anc_id}")
+                res_c, _ = exp_mgr.run_cross_descendant(cc_scenarios, sub_clean, cdcr_commands, tag=f"clean_{anc_id}") if sub_clean else ({}, [])
+                cdcr_by_ancestor[anc_id] = res_a
+                cdcr_clean_by_ancestor[anc_id] = res_c
+        else:
+            cdcr_by_ancestor["mock_ancestor_1"] = cdcr_affected
+
+        cdcr_affected["by_ancestor_group"] = cdcr_by_ancestor
+        cdcr_clean["by_ancestor_group"] = cdcr_clean_by_ancestor
     else:
+        # P0-1: 実モデル評価において祖先ハッシュ・メタデータを確実に伝播
         for anc_id, m_list in by_upstream_hash.items():
-            anc_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in m_list}
-            anc_clean = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in clean_ckpts[:len(m_list)]}
+            anc_desc = {
+                m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m), get_model_meta(m))
+                for m in m_list
+            }
+            anc_clean = {
+                m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m), get_model_meta(m))
+                for m in clean_ckpts[:len(m_list)]
+            }
             tag_aff = f"affected_{anc_id[:8]}"
             tag_cln = f"clean_{anc_id[:8]}"
             res_aff, recs_aff = exp_mgr.run_cross_descendant(cc_scenarios, anc_desc, cdcr_commands, tag=tag_aff)
@@ -752,10 +818,17 @@ def run_command_channel(
             all_aff_records.extend(recs_aff)
             all_cln_records.extend(recs_cln)
 
-        # 代表グループ（最大の共通祖先グループ）
-        primary_anc_id = max(by_upstream_hash.keys(), key=lambda k: len(by_upstream_hash[k]))
-        cdcr_affected = dict(cdcr_by_ancestor[primary_anc_id])
-        cdcr_clean = dict(cdcr_clean_by_ancestor.get(primary_anc_id, {}))
+        # 全祖先統合の全体集計 (Pooled)
+        all_desc_models = {
+            m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m), get_model_meta(m))
+            for m in post_ckpts
+        }
+        all_clean_models = {
+            m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m), get_model_meta(m))
+            for m in clean_ckpts[:len(post_ckpts)]
+        }
+        cdcr_affected, _ = exp_mgr.run_cross_descendant(cc_scenarios, all_desc_models, cdcr_commands, tag="affected")
+        cdcr_clean, _ = exp_mgr.run_cross_descendant(cc_scenarios, all_clean_models, cdcr_commands, tag="clean") if all_clean_models else ({}, [])
         cdcr_affected["by_ancestor_group"] = cdcr_by_ancestor
         cdcr_clean["by_ancestor_group"] = cdcr_clean_by_ancestor
 

@@ -888,16 +888,37 @@ from lineage_collusion.evaluation.command_metrics import CommandEvalRecord
 
 
 def _onesample_greater(diffs: List[float], label: str) -> Dict[str, Any]:
-    """対応差 diffs が 0 より大きいか（片側）。不推定は NOT_ESTIMABLE。"""
+    """対応差 diffs が 0 より大きいか（片側）。不推定・縮退は理由を明記。"""
     arr = np.asarray([d for d in diffs if d is not None], dtype=float)
-    if len(arr) < 2 or float(np.std(arr)) == 0.0:
+    if len(arr) == 0:
         return {
             "name": label, "status": "NOT_ESTIMABLE",
-            "estimated_effect": float(np.mean(arr)) if len(arr) else None,
-            "statistic": None, "p_value": None, "ci_95": None, "n_clusters": int(len(arr)),
+            "reason": "有効な観測データが存在しません。",
+            "estimated_effect": None, "statistic": None, "p_value": None, "ci_95": None, "n_clusters": 0,
         }
-    res = stats.ttest_1samp(arr, 0.0, alternative="greater")
     mean = float(np.mean(arr))
+    if len(arr) < 2:
+        return {
+            "name": label, "status": "NOT_ESTIMABLE",
+            "reason": "標本サイズ不足 (N < 2) のため標本分散を推定できません。",
+            "estimated_effect": round(mean, 4), "statistic": None, "p_value": None, "ci_95": None, "n_clusters": int(len(arr)),
+        }
+    if float(np.std(arr)) == 0.0:
+        if mean > 0.0:
+            # P1-2: 全サンプルで同一の正の差分（天井効果 / 完全追従）
+            return {
+                "name": label, "status": "ESTIMABLE_DEGENERATE",
+                "reason": "Ceiling effect: zero sample variance with constant positive difference (perfect effect across all units)",
+                "estimated_effect": round(mean, 4), "statistic": float("inf"), "p_value": 0.0,
+                "ci_95": [round(mean, 4), round(mean, 4)], "n_clusters": int(len(arr)),
+            }
+        else:
+            return {
+                "name": label, "status": "NOT_ESTIMABLE",
+                "reason": "全標本の値が同一（標本分散ゼロ）かつ非正のため推定不能です。",
+                "estimated_effect": round(mean, 4), "statistic": None, "p_value": None, "ci_95": None, "n_clusters": int(len(arr)),
+            }
+    res = stats.ttest_1samp(arr, 0.0, alternative="greater")
     se = float(np.std(arr, ddof=1) / np.sqrt(len(arr)))
     t_crit = float(stats.t.ppf(0.975, df=len(arr) - 1))
     return {
@@ -1063,7 +1084,7 @@ def run_command_hypotheses_testing(
                         "n_checkpoints_compared": len(aff_rates),
                     }
 
-                # 3. 共通祖先（upstream_checkpoint_hash）クラスタリングと階層推論 (P0-2)
+                # 3. 共通祖先（upstream_checkpoint_hash）クラスタリングと階層推論 (P0-1, P0-2)
                 anc_aff = {}
                 for r in cdcr_affected:
                     d_id = getattr(r, "descendant_id", None) or getattr(r, "model_name", None)
@@ -1072,50 +1093,117 @@ def run_command_hypotheses_testing(
                         or (str(getattr(r, "upstream_seed", "")) if getattr(r, "upstream_seed", None) is not None else None)
                         or getattr(r, "ancestor_id", None)
                     )
+                    # P0-1: 出自情報が欠損しているレコードは除外し、捏造フォールバックを禁止
                     if not u_hash:
-                        u_hash = "ancestor_default"
+                        continue
                     if d_id and d_id in aff_rates:
                         anc_aff.setdefault(u_hash, {})[d_id] = aff_rates[d_id]
 
-                ancestor_hierarchy = {
-                    u_hash: {
-                        "n_descendants": len(models_dict),
-                        "mean_cdcr": round(float(np.mean(list(models_dict.values()))), 4),
-                        "descendant_rates": {k: round(v, 4) for k, v in models_dict.items()},
+                if not anc_aff:
+                    res_hc2 = {
+                        "name": "HC2_Cross_Descendant",
+                        "status": "NOT_ESTIMABLE",
+                        "reason": "有効な共通祖先情報 (upstream_checkpoint_hash) が全レコードで欠損しています（出自不明・捏造フォールバック排除）。",
+                        "analysis_unit": "ancestor_clusters",
+                        "n_ancestor_clusters": 0,
+                        "model_level_stats": model_stats,
+                        "ancillary_checkpoint_level": model_level_test,
+                        "scenario_level_exploratory": scenario_test,
                     }
-                    for u_hash, models_dict in anc_aff.items()
-                }
-
-                # 祖先クラスタ平均を標本単位とする階層主検定
-                n_clusters = len(anc_aff)
-                cluster_means = [info["mean_cdcr"] for info in ancestor_hierarchy.values()]
-
-                if n_clusters >= 2:
-                    # 共通祖先クラスタが 2 つ以上存在する場合: 祖先クラスタ階層主検定
-                    cluster_diffs = [c_m - mean_cln for c_m in cluster_means]
-                    res_hc2 = _onesample_greater(cluster_diffs, "HC2_Cross_Descendant")
-                    res_hc2["analysis_unit"] = "ancestor_clusters"
-                    res_hc2["n_ancestor_clusters"] = n_clusters
-                elif len(aff_rates) >= 2:
-                    # 共通祖先は 1 つだが派生モデルが複数ある場合: モデル間分散検定
-                    res_hc2 = dict(model_level_test)
-                    res_hc2["name"] = "HC2_Cross_Descendant"
-                    res_hc2["analysis_unit"] = "independent_checkpoints"
-                    res_hc2["n_ancestor_clusters"] = n_clusters
-                    res_hc2["hierarchy_note"] = "祖先クラスタ数が C=1 のため、推論範囲は単一共通祖先に限定されたチェックポイント間検定となります。"
                 else:
-                    # 単一モデル評価時 (小標本テスト互換): シナリオ単位検定
-                    res_hc2 = dict(scenario_test)
-                    res_hc2["name"] = "HC2_Cross_Descendant"
-                    res_hc2["analysis_unit"] = "scenario_level"
-                    res_hc2["n_ancestor_clusters"] = n_clusters
-                    res_hc2["hierarchy_note"] = "独立チェックポイント数が不足 (N=1) のため、モデル間分散は評価されずシナリオ間変動に基づきます。"
+                    ancestor_hierarchy = {
+                        u_hash: {
+                            "n_descendants": len(models_dict),
+                            "mean_cdcr": round(float(np.mean(list(models_dict.values()))), 4),
+                            "descendant_rates": {k: round(v, 4) for k, v in models_dict.items()},
+                        }
+                        for u_hash, models_dict in anc_aff.items()
+                    }
 
-                res_hc2["model_level_stats"] = model_stats
-                res_hc2["model_level_test"] = model_level_test
-                res_hc2["ancestor_hierarchy"] = ancestor_hierarchy
-                res_hc2["scenario_level_exploratory"] = scenario_test
-                res_hc2["n_scenarios_compared"] = scenario_test.get("n_scenarios_compared", 0)
+                    n_clusters = len(anc_aff)
+                    cluster_means = [info["mean_cdcr"] for info in ancestor_hierarchy.values()]
+                    mean_aff_cluster = float(np.mean(cluster_means))
+
+                    # 正常対照群の分散不確実性（P0-2: 対照群平均を固定定数とせずサンプリング分散を合成）
+                    cln_vals = list(cln_rates.values())
+                    n_cln = len(cln_vals)
+                    mean_cln = float(np.mean(cln_vals))
+                    var_cln = float(np.var(cln_vals, ddof=1)) if n_cln > 1 else 0.0
+
+                    if n_clusters >= 2:
+                        # 共通祖先クラスタが 2 つ以上存在する場合: 祖先クラスタ階層主検定（Welch 型 2 標本比較）
+                        var_aff = float(np.var(cluster_means, ddof=1))
+                        v_aff = var_aff / n_clusters
+                        v_cln = var_cln / n_cln if n_cln > 0 else 0.0
+                        se_diff = float(np.sqrt(v_aff + v_cln))
+                        diff_est = float(mean_aff_cluster - mean_cln)
+
+                        # 自由度（Welch-Satterthwaite 近似）
+                        if v_aff + v_cln > 0 and n_cln > 1 and v_cln > 0:
+                            num = (v_aff + v_cln) ** 2
+                            den = (v_aff ** 2 / (n_clusters - 1)) + (v_cln ** 2 / (n_cln - 1))
+                            df = max(1.0, float(num / den))
+                        else:
+                            df = max(1.0, float(n_clusters - 1))
+
+                        if se_diff == 0.0:
+                            if diff_est > 0:
+                                res_hc2 = {
+                                    "name": "HC2_Cross_Descendant", "status": "ESTIMABLE_DEGENERATE",
+                                    "reason": "Ceiling effect: zero variance across ancestor clusters with positive effect",
+                                    "estimated_effect": round(diff_est, 4), "statistic": float("inf"),
+                                    "p_value": 0.0, "ci_95": [round(diff_est, 4), round(diff_est, 4)],
+                                    "n_ancestor_clusters": n_clusters, "analysis_unit": "ancestor_clusters",
+                                }
+                            else:
+                                res_hc2 = {
+                                    "name": "HC2_Cross_Descendant", "status": "NOT_ESTIMABLE",
+                                    "reason": "Zero variance with non-positive effect across clusters",
+                                    "estimated_effect": round(diff_est, 4), "statistic": None,
+                                    "p_value": None, "ci_95": None,
+                                    "n_ancestor_clusters": n_clusters, "analysis_unit": "ancestor_clusters",
+                                }
+                        else:
+                            t_stat = diff_est / se_diff
+                            p_val = float(1.0 - stats.t.cdf(t_stat, df=df))
+                            t_crit = float(stats.t.ppf(0.975, df=df))
+                            ci_low = round(diff_est - t_crit * se_diff, 4)
+                            ci_high = round(diff_est + t_crit * se_diff, 4)
+                            res_hc2 = {
+                                "name": "HC2_Cross_Descendant", "status": "ESTIMABLE",
+                                "estimated_effect": round(diff_est, 4), "statistic": round(float(t_stat), 4),
+                                "p_value": float(p_val), "ci_95": [ci_low, ci_high],
+                                "degrees_of_freedom": round(df, 2),
+                                "se_diff": round(se_diff, 4),
+                                "n_ancestor_clusters": n_clusters, "analysis_unit": "ancestor_clusters",
+                            }
+
+                        # P0-2: クラスタ数が不十分な場合の確認的主張の制限
+                        if n_clusters < 5:
+                            res_hc2["inference_tier"] = "exploratory_small_sample"
+                            res_hc2["hierarchy_note"] = (
+                                f"独立祖先クラスタ数が小標本 (C={n_clusters}, df={round(df, 2)}) のため、"
+                                f"検定結果は確認的証拠 (confirmatory proof) ではなく探索的・記述的参考値 (exploratory/descriptive) として解釈する必要があります。"
+                            )
+                        else:
+                            res_hc2["inference_tier"] = "confirmatory"
+                    else:
+                        # 共通祖先が 1 つしかない場合: 統計単位を途中で動的変更せず、主検定としては推定不能とする
+                        res_hc2 = {
+                            "name": "HC2_Cross_Descendant",
+                            "status": "NOT_ESTIMABLE",
+                            "reason": f"祖先クラスタ数が不足 (C={n_clusters} < 2) のため、共通祖先への継承効果は推定不能です（統計単位の動的すり替え禁止）。",
+                            "analysis_unit": "ancestor_clusters",
+                            "n_ancestor_clusters": n_clusters,
+                            "estimated_effect": round(mean_aff_cluster - mean_cln, 4),
+                            "hierarchy_note": "祖先クラスタ数が C=1 のため祖先間分散は推定できません。補助解析 (ancillary_checkpoint_level) を参照してください。",
+                        }
+
+                    res_hc2["model_level_stats"] = model_stats
+                    res_hc2["ancillary_checkpoint_level"] = model_level_test
+                    res_hc2["ancestor_hierarchy"] = ancestor_hierarchy
+                    res_hc2["scenario_level_exploratory"] = scenario_test
+                    res_hc2["n_scenarios_compared"] = scenario_test.get("n_scenarios_compared", 0)
             elif not cln_rates:
                 # P1-2: 正常対照群が未観測の場合の明示的ハンドリング（0.0埋め排除）
                 res_hc2 = {

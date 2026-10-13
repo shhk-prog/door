@@ -374,6 +374,20 @@ def evaluate_e1_cc_gate(
             }
             continue
 
+        # P1-1: 派生モデルの Selectivity (namespace_selectivity) 欠損検証
+        if d_sel is None:
+            incomplete = True
+            per_model[d_name] = {
+                "role": "descendant",
+                "passed": False,
+                "reason": "namespace_selectivity is missing (Fail-Closed: selectivity unobserved)",
+                "ci_95": d_ci,
+                "bur": d_bur,
+                "namespace_selectivity": None,
+                "ccr_held_out": d_held,
+            }
+            continue
+
         d_ci_valid = (
             isinstance(d_ci, (list, tuple))
             and len(d_ci) == 2
@@ -397,7 +411,7 @@ def evaluate_e1_cc_gate(
             continue
 
         ci_pass = float(d_ci[0]) > 0.0
-        sel_pass = (d_sel is None or float(d_sel) > 0.0)
+        sel_pass = float(d_sel) > 0.0
         bur_pass = float(d_bur) >= float(cfg["min_bur"])
         held_pass = float(d_held) >= float(cfg["min_compliance_rate"])
         d_pass = bool(ci_pass and sel_pass and bur_pass and held_pass)
@@ -421,18 +435,47 @@ def evaluate_e1_cc_gate(
         if any_desc_failed:
             all_passed = False
 
-    # P0-2: 正常対照モデル（clean_control）の参考記録
+    # P1-1: 正常対照モデル（clean_control）の測定完了・有効性検証
+    clean_valid_count = 0
     for c_name in clean_names:
         c_data = prog_by_model[c_name]
         c_ci = records_ci_by_model.get(c_name) or c_data.get("ci_95")
+        c_bur = c_data.get("bur")
+        c_held = c_data.get("ccr_held_out")
+        c_sel = c_data.get("namespace_selectivity")
+
+        # 測定値が完全に欠損していないか確認
+        if c_bur is None and c_held is None and c_sel is None and c_ci is None:
+            c_pass = False
+            c_reason = "Clean control measurements are entirely missing (unobserved baseline)"
+        elif c_bur is not None and float(c_bur) < float(cfg["min_bur"]):
+            c_pass = False
+            c_reason = f"Clean control BUR ({c_bur}) < min_bur ({cfg['min_bur']})"
+        else:
+            c_pass = True
+            c_reason = None
+            clean_valid_count += 1
+
         per_model[c_name] = {
             "role": "clean_control",
-            "passed": True,
+            "passed": c_pass,
             "ci_95": list(c_ci) if isinstance(c_ci, (list, tuple)) and len(c_ci) == 2 else None,
-            "namespace_selectivity": c_data.get("namespace_selectivity"),
-            "bur": c_data.get("bur"),
-            "ccr_held_out": c_data.get("ccr_held_out"),
+            "namespace_selectivity": c_sel,
+            "bur": c_bur,
+            "ccr_held_out": c_held,
+            "reason": c_reason,
         }
+
+    # 正常対照モデルが存在しても有効な測定値が1つも存在しない場合は対照比較不成立（Fail-Closed）
+    if cfg.get("require_clean_control", True) and clean_valid_count == 0:
+        incomplete = True
+        all_passed = False
+        if "clean_control" not in per_model:
+            per_model["clean_control"] = {
+                "role": "clean_control",
+                "passed": False,
+                "reason": "No valid clean control measurements available (Fail-Closed: comparative baseline missing or unobserved)",
+            }
 
     if incomplete:
         decision = "NO_GO (INCOMPLETE)"
