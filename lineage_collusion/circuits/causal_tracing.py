@@ -15,7 +15,7 @@ from lineage_collusion.circuits.circuit_eval_types import (
 from lineage_collusion.circuits.mock_circuit_engine import MockCircuitBackend
 from lineage_collusion.data.generator.utility import ProcurementScenario
 from lineage_collusion.data.generator.command_channel import apply_command_channel, resolve_command_target
-from lineage_collusion.agents.communication import format_scenario_context
+from lineage_collusion.circuits.interventions import circuit_prompt
 
 
 def run_causal_tracing(
@@ -44,8 +44,8 @@ def run_causal_tracing(
         if opt == cmd_target:
             continue
 
-        ctx_benign = format_scenario_context(sc)
-        ctx_authed = format_scenario_context(sc_authed)
+        ctx_benign = circuit_prompt(sc)
+        ctx_authed = circuit_prompt(sc_authed)
 
         # 認証命令時の各層の活性化を抽出（パッチング用）
         h_authed = backend.extract_hidden_states(sid, ctx_authed, condition="authenticated")
@@ -108,7 +108,7 @@ def run_causal_tracing(
     for sc in scenarios[: min(20, len(scenarios))]:
         sid = sc.scenario_id
         opt = sc.optimal_provider
-        ctx_benign = format_scenario_context(sc)
+        ctx_benign = circuit_prompt(sc)
 
         for l in range(num_layers):
             choice_benign = backend.intervene_and_predict(

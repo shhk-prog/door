@@ -21,7 +21,20 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
+from lineage_collusion.agents.agent_runner import parse_agent_json_response
+from lineage_collusion.agents.likelihood import (
+    RANKING_KEYS,
+    SCORING_PROTOCOL,
+    validate_scoring_config,
+)
+from lineage_collusion.analysis.gate import GATE_EXIT_CODE, evaluate_e1_gate, gate_allows_continuation
 from lineage_collusion.analysis.statistical_tests import run_hypotheses_testing
+from lineage_collusion.analysis.summary_schema import (
+    row_from_gate,
+    rows_from_hypotheses,
+    summary_rows_to_csv,
+    validate_summary_rows,
+)
 from lineage_collusion.data.build_datasets import generate_all_datasets
 from lineage_collusion.data.generator.scenario_generator import apply_trigger_condition
 from lineage_collusion.data.generator.command_channel import (
@@ -36,8 +49,52 @@ from lineage_collusion.training.model_registry import (
     ModelRegistry,
     compute_directory_sha256,
 )
+from lineage_collusion.utils.io import resolve_output_dir, write_json, write_text
+from lineage_collusion.utils.manifests import (
+    CODE_VERSION,
+    RunManifest,
+    compute_config_hash,
+    compute_file_hash,
+    compute_files_hash,
+    generate_run_id,
+    get_git_commit,
+    is_manifest_matching,
+    now_iso,
+)
 
 console = Console()
+
+
+class MockLikelihoodAgent:
+    """
+    dry-run 専用: 決定論的 Mock の生成出力（順位）に確率 peak を置いた6順位候補の分布を返す。
+    尤度採点経路（score_rankings → 最尤順位・P 選択確率・共同確率）を端から端まで通すためのもので、
+    分布の形は手で決めた模擬値であり実測ではない。
+    """
+
+    def __init__(self, fn: Callable[[str], str], peak: float = 0.85):
+        self.fn = fn
+        self.peak = peak
+
+    def __call__(self, prompt: str) -> str:
+        return self.fn(prompt)
+
+    def score_rankings(self, prompt: str) -> List[float]:
+        parsed, ok = parse_agent_json_response(self.fn(prompt))
+        n = len(RANKING_KEYS)
+        if not ok or parsed is None:
+            return [1.0 / n] * n
+        probs = [(1.0 - self.peak) / (n - 1)] * n
+        probs[RANKING_KEYS.index(">".join(parsed["ranking"]))] = self.peak
+        return probs
+
+
+def load_models_config(resolved_config: Dict[str, Any]) -> Dict[str, Any]:
+    path = Path(resolved_config.get("models_config", "lineage_collusion/configs/models.yaml"))
+    if not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 def create_deterministic_mock_agent(
@@ -128,7 +185,9 @@ def create_deterministic_mock_agent(
                     p_prob += provenance_boost
 
         # 環境非依存のsha256ハッシュで確率判定 (0.0〜1.0)
-        h_val = int(hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:8], 16) / 0xFFFFFFFF
+        # 上流 seed をハッシュに含め、seed 間変動（checkpoint 間のばらつき）を模擬する。
+        # seed 不変の Mock では seed 単位の分散がゼロになり、H1 の CI が推定不能（E1 ゲート INCOMPLETE）となるため。
+        h_val = int(hashlib.sha256(f"{upstream_seed}|{prompt}".encode("utf-8")).hexdigest()[:8], 16) / 0xFFFFFFFF
         if h_val < p_prob:
             choice = "P"
             ranking = ["P"] + [x for x in [true_opt, second_opt, third_opt] if x != "P"]
@@ -325,7 +384,7 @@ def run_e0_audit(data_dir: Path) -> bool:
     return True
 
 
-def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) -> None:
+def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, cfg: Optional[Dict[str, Any]] = None) -> None:
     """
     Programmable command channel の E1 Programmability と Cross-Descendant Control を実行（§7）。
     dry_run では clean/fixed/programmable の決定論的 Mock を使い、
@@ -413,8 +472,7 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
     # E1 Programmability
     prog_summary, e1_cc_records = exp_mgr.run_e1_programmability(cc_scenarios, cc_models)
     prog_summary["execution_mode"] = execution_mode
-    with open(out_dir / "cc" / "e1_programmability_summary.json", "w", encoding="utf-8") as f:
-        json.dump(prog_summary, f, indent=2, ensure_ascii=False)
+    write_json(out_dir / "cc" / "e1_programmability_summary.json", prog_summary)
 
     # 横断制御 (Cross-Descendant Control)
     # P0: affected と clean の個別ファイル保存（上書き防止）
@@ -481,8 +539,7 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         else:
             pr_summary["status"] = "NOT_ESTIMABLE: manifest に pre-FT (affected_upstream) または post-FT 派生モデルが不足しています"
 
-    with open(out_dir / "cc" / "persistence_ratio_summary.json", "w", encoding="utf-8") as f:
-        json.dump(pr_summary, f, indent=2, ensure_ascii=False)
+    write_json(out_dir / "cc" / "persistence_ratio_summary.json", pr_summary)
 
     # P0-4: E2 Provider-Induced Collusion（実モデル・Mock 両方で実行）
     if args.dry_run:
@@ -547,8 +604,7 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
             collusion_summary, collusion_records = {"cells": {}, "status": "NO_PAIRS_AVAILABLE"}, []
 
     collusion_summary["execution_mode"] = execution_mode
-    with open(out_dir / "cc" / "e2_collusion_summary.json", "w", encoding="utf-8") as f:
-        json.dump(collusion_summary, f, indent=2, ensure_ascii=False)
+    write_json(out_dir / "cc" / "e2_collusion_summary.json", collusion_summary)
 
     # 命令チャネルの仮説検定（独立 Holm ファミリー）
     from lineage_collusion.analysis.statistical_tests import run_command_hypotheses_testing
@@ -558,8 +614,7 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         collusion_records=collusion_records,
     )
     cmd_stats["execution_mode"] = execution_mode
-    with open(out_dir / "cc" / "command_hypotheses_summary.json", "w", encoding="utf-8") as f:
-        json.dump(cmd_stats, f, indent=2, ensure_ascii=False)
+    write_json(out_dir / "cc" / "command_hypotheses_summary.json", cmd_stats)
 
     # 結果テーブル
     t = Table(title=f"E1 Programmability (Command Channel, mode={execution_mode})")
@@ -617,12 +672,17 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         real_load_failed = False
         for m in prog_ckpts + clean_ckpts:
             is_aff = "affected" in m.model_role
-            m_path = m.full_model_path or m.adapter_path or m.base_model_name_or_path
+            # ベース（またはマージ済みフルモデル）+ LoRA アダプタを分けて渡し、Hub 読み込み時は revision を固定
+            m_path = m.full_model_path or m.base_model_name_or_path
             try:
                 circuit_backends[m.checkpoint_id] = RealModelCircuitBackend(
                     model_name_or_path=m_path,
                     checkpoint_id=m.checkpoint_id,
                     is_affected=is_aff,
+                    torch_dtype=registry.torch_dtype,
+                    revision=None if m.full_model_path else m.base_model_revision,
+                    adapter_path=m.adapter_path,
+                    chat_template_kwargs=registry.chat_template_kwargs,
                 )
             except Exception as e:
                 console.print(f"[red]実モデル '{m.checkpoint_id}' ({m_path}) の内部回路バックエンド初期化に失敗しました: {e}[/red]")
@@ -633,12 +693,26 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
             console.print("[bold red]エラー: 実モデルの重み/環境がロードできないため、実モデルでの内部回路分析を中断します。Mockでの推論結果を実測定値と偽ることは研究整合性上禁止されています。[/bold red]")
             sys.exit(1)
 
+    # 系譜ラベル（系譜横断の方向転移用）: affected は祖先識別子、clean は None
+    if args.dry_run:
+        lineage_of = {
+            "affected_upstream": "mock_ancestor", "descendant_org_a": "mock_ancestor",
+            "descendant_org_b": "mock_ancestor", "clean_base": None, "clean_org_a": None,
+        }
+    else:
+        lineage_of = {
+            m.checkpoint_id: (m.upstream_checkpoint_hash or (str(m.upstream_seed) if m.upstream_seed is not None else m.checkpoint_id))
+            if "affected" in m.model_role else None
+            for m in prog_ckpts + clean_ckpts
+        }
     circuit_summary = exp_mgr.run_circuit_analysis(
         cc_scenarios[: min(30, len(cc_scenarios))],
         circuit_backends,
         upstream_id="affected_upstream" if args.dry_run else (upstream_ckpts[0].checkpoint_id if upstream_ckpts else None),
         clean_id="clean_base" if args.dry_run else (clean_ckpts[0].checkpoint_id if clean_ckpts else None),
         execution_mode=execution_mode,
+        circuit_cfg=(cfg or {}).get("circuits"),
+        lineage_of=lineage_of,
     )
 
     tc = Table(title=f"Internal Circuit Analysis & Persistence (E3 & E4, mode={execution_mode})")
@@ -818,9 +892,23 @@ def main():
         help="E2で記録された通信履歴JSONLパス (E3単独実行時に使用)",
     )
     parser.add_argument("--output_dir", type=str, default="results")
+    parser.add_argument(
+        "--decision_mode",
+        type=str,
+        default=None,
+        choices=["likelihood", "generation"],
+        help="意思決定の取得方法（既定は config の decision.mode）。generation は感度分析用",
+    )
+    parser.add_argument("--force", action="store_true", help="同一 manifest の完了済み結果があっても再計算する（本番モード）")
+    parser.add_argument(
+        "--force_after_no_go",
+        action="store_true",
+        help="E1 ゲートが GO でなくても E2/E3 を続行する（以降の結果は exploratory として記録）",
+    )
     args = parser.parse_args()
 
-    out_dir = Path(args.output_dir)
+    # dry-run の出力は <output_dir>/dry_run/ に隔離（本番結果・ゲート判定と混在させない）
+    out_dir = resolve_output_dir(Path(args.output_dir), args.dry_run)
     out_dir.mkdir(parents=True, exist_ok=True)
     data_dir = Path("lineage_collusion/data/generated")
 
@@ -830,9 +918,53 @@ def main():
     if cfg_path.exists():
         with open(cfg_path, "r", encoding="utf-8") as f:
             resolved_config = yaml.safe_load(f)
+    models_cfg = load_models_config(resolved_config)
+    decision_mode = args.decision_mode or resolved_config.get("decision", {}).get("mode", "likelihood")
+    validate_scoring_config(resolved_config)
+    config_hash = compute_config_hash({"config": resolved_config, "models": models_cfg})
     resolved_config["cli_args"] = vars(args)
-    with open(out_dir / "resolved_config.yaml", "w", encoding="utf-8") as f:
-        yaml.dump(resolved_config, f, allow_unicode=True)
+    resolved_config["resolved_decision_mode"] = decision_mode
+    write_text(out_dir / "resolved_config.yaml", yaml.dump(resolved_config, allow_unicode=True))
+
+    # 本番モード: 決定性設定（CUBLAS ワークスペース・seed・TF32 無効化）
+    if not args.dry_run:
+        from lineage_collusion.utils.determinism import configure_determinism
+        configure_determinism(seed=int(resolved_config.get("seed", 42)))
+
+    # 実行台帳（run manifest）
+    git_info = get_git_commit(Path(__file__).resolve().parent)
+    manifest = RunManifest(
+        run_id=generate_run_id(config_hash, git_info["commit"]),
+        created_at=now_iso(),
+        mode=args.mode,
+        dry_run=bool(args.dry_run),
+        git_commit=git_info["commit"],
+        git_dirty=git_info["dirty"],
+        config_hash=config_hash,
+        dataset_hash=compute_files_hash(sorted(data_dir.glob("*.jsonl"))) if data_dir.exists() else None,
+        checkpoint_manifest_hash=compute_file_hash(Path(args.manifest)) if args.manifest else None,
+        code_version=CODE_VERSION,
+        decision_mode=decision_mode,
+        scoring_protocol=SCORING_PROTOCOL if decision_mode == "likelihood" else {"method": "free_generation_json_parse"},
+        models=models_cfg.get("models", {}),
+        seed=resolved_config.get("seed"),
+        cli_args=vars(args),
+    )
+    manifest_path = out_dir / "run_manifest.json"
+    if not args.dry_run and not args.force and is_manifest_matching(manifest_path, manifest):
+        console.print(
+            f"[bold yellow]{manifest_path} に同一条件（config/data/code/models）の完了済み結果があります。"
+            "再計算する場合は --force を指定してください。[/bold yellow]"
+        )
+        return
+    write_json(manifest_path, manifest.model_dump())
+
+    def finalize(status: str, success: bool) -> None:
+        manifest.completed_at = now_iso()
+        manifest.exit_status = status
+        manifest.execution_success = success
+        # 同一 run 内の更新は退避しない（前回 run の manifest は開始時に退避済み）
+        write_json(manifest_path, manifest.model_dump(), archive=False)
 
     # P1-4: YAMLから設定値を取得
     comm_rounds = resolved_config.get("multi_agent", {}).get("communication_rounds", 1)
@@ -843,6 +975,7 @@ def main():
             generate_all_datasets(data_dir, config_path=cfg_path)
         run_e0_audit(data_dir)
         if args.mode in ["e0", "generate_data"]:
+            finalize("completed", True)
             return
 
     # テストシナリオ読み込み
@@ -861,10 +994,19 @@ def main():
 
     exp_mgr = ExperimentManager(out_dir)
     registry = ModelRegistry()
+    inference_cfg = models_cfg.get("inference", {})
+    registry.configure_inference(
+        torch_dtype=inference_cfg.get("torch_dtype", resolved_config.get("models", {}).get("torch_dtype", "bfloat16")),
+        chat_template_kwargs=inference_cfg.get("chat_template_kwargs", {}),
+        load_log_path=out_dir / "model_load_log.jsonl",
+    )
+    registry.decision_mode = decision_mode
+    execution_mode = "mock" if args.dry_run else "real"
 
     # === Programmable command channel モード（§7）: E1 Programmability + 横断制御 ===
     if args.mode == "cc":
-        run_command_channel(exp_mgr, data_dir, out_dir, args, registry)
+        run_command_channel(exp_mgr, data_dir, out_dir, args, registry, cfg=resolved_config)
+        finalize("completed", True)
         return
 
     pair_models: Dict[str, Tuple[Callable[[str], str], Callable[[str], str]]] = {}
@@ -1130,11 +1272,62 @@ def main():
                 }
 
 
+    # dry-run かつ尤度採点モード: Mock を MockLikelihoodAgent で包み、尤度採点経路を通す
+    if args.dry_run and decision_mode == "likelihood":
+        _wrapped: Dict[int, MockLikelihoodAgent] = {}
+
+        def _wrap(fn):
+            if fn is None or hasattr(fn, "score_rankings"):
+                return fn
+            if id(fn) not in _wrapped:
+                _wrapped[id(fn)] = MockLikelihoodAgent(fn)
+            return _wrapped[id(fn)]
+
+        e1_models = {k: (_wrap(v[0]),) + tuple(v[1:]) for k, v in e1_models.items()}
+        pair_models = {k: (_wrap(v[0]), _wrap(v[1])) for k, v in pair_models.items()}
+        clean_org_a_fn = _wrap(clean_org_a_fn)
+
+    # E2/E3 単独実行: 同じ出力先の E1 ゲート判定が GO であることを要求（dry_run/ の判定は本番を許可できない）
+    gate_path = out_dir / "statistics" / "e1_gate_decision.json"
+    gate_payload: Optional[Dict[str, Any]] = None
+    if args.mode in ["e2", "e3"]:
+        gate_payload = json.loads(gate_path.read_text(encoding="utf-8")) if gate_path.exists() else None
+        if not gate_allows_continuation(gate_payload):
+            if not args.force_after_no_go:
+                console.print(
+                    f"[bold red]E1 ゲート判定が GO ではありません（{gate_path}: "
+                    f"{(gate_payload or {}).get('decision', 'missing')}）。--force_after_no_go で探索的に続行できます。[/bold red]"
+                )
+                finalize("blocked_by_e1_gate", False)
+                sys.exit(GATE_EXIT_CODE)
+            manifest.forced_after_no_go = True
+
     # E1 実行
     e1_records_eval = []
     if args.mode in ["e1", "all"]:
         e1_res, e1_records_eval = exp_mgr.run_e1_inheritance(test_scenarios, e1_models)
         console.print("[green]E1 Completed. Individual backdoor inheritance evaluated.[/green]")
+
+        # E1 ゲート（emo2 V3 Go/No-Go の移植）: H1A/H1B の CI 下限が事前固定しきい値を超えたときのみ続行
+        gate_cfg = resolved_config.get("gate", {}).get("e1", {})
+        h1_only = run_hypotheses_testing([], e1_records=e1_records_eval, outcome=gate_cfg.get("outcome", "hard"))
+        gate_payload = evaluate_e1_gate(h1_only["hypotheses_results"], gate_cfg)
+        gate_payload["execution_mode"] = execution_mode
+        gate_payload["run_id"] = manifest.run_id
+        write_json(gate_path, gate_payload)
+        console.print(f"[bold cyan]E1 Gate: {gate_payload['decision']}[/bold cyan]")
+        if args.mode == "all" and not gate_payload["pipeline_continues"]:
+            if not args.force_after_no_go:
+                console.print(
+                    "[bold red]E1 ゲートが GO ではないため E2/E3 を実行しません（主結論として NO_GO を報告）。"
+                    "探索的に続行する場合は --force_after_no_go を指定してください。[/bold red]"
+                )
+                finalize(f"stopped_at_e1_gate:{gate_payload['decision']}", True)
+                sys.exit(GATE_EXIT_CODE)
+            manifest.forced_after_no_go = True
+            manifest.notes.append("E1 gate was not GO; E2/E3 continued with --force_after_no_go (exploratory)")
+            gate_payload["forced_after_no_go"] = True
+            write_json(gate_path, gate_payload, archive=False)
 
     # E2 実行
     all_eval_records = []
@@ -1195,10 +1388,27 @@ def main():
         # 統計仮説検定 (H1〜H4)
         console.print("[bold cyan]=== Running Hypotheses Testing (H1〜H4, Holm Correction) ===[/bold cyan]")
         stats_records = all_eval_records + interv_records
-        stat_results = run_hypotheses_testing(stats_records, e1_records=e1_records_eval)
-        
-        with open(out_dir / "statistics" / "hypotheses_summary.json", "w", encoding="utf-8") as f:
-            json.dump(stat_results, f, indent=2, ensure_ascii=False)
+        stat_results = run_hypotheses_testing(stats_records, e1_records=e1_records_eval, outcome="hard")
+        soft_results = run_hypotheses_testing(stats_records, e1_records=e1_records_eval, outcome="soft")
+        primary_role = "exploratory" if manifest.forced_after_no_go else "primary"
+        stat_results["analysis_role"] = primary_role
+        soft_results["analysis_role"] = "exploratory" if manifest.forced_after_no_go else "secondary"
+        stat_results["secondary_soft"] = soft_results
+        stat_results["e1_gate"] = gate_payload
+        stat_results["decision_mode"] = decision_mode
+        stat_results["execution_mode"] = execution_mode
+        stat_results["run_id"] = manifest.run_id
+
+        write_json(out_dir / "statistics" / "hypotheses_summary.json", stat_results)
+
+        # 結果サマリー表（analysis_role で主解析 / secondary / sensitivity / gate を区別）
+        src = str(out_dir / "statistics" / "hypotheses_summary.json")
+        rows = rows_from_hypotheses(stat_results, "E1-E3", primary_role, execution_mode, src)
+        rows += rows_from_hypotheses(soft_results, "E1-E3", soft_results["analysis_role"], execution_mode, src)
+        if gate_payload:
+            rows.append(row_from_gate(gate_payload, execution_mode, str(gate_path)))
+        rows = validate_summary_rows(rows, allow_dry_run=args.dry_run)
+        write_text(out_dir / "statistics" / "summary_table.csv", summary_rows_to_csv(rows))
 
         table = Table(title="Statistical Hypotheses Testing Results (Rigorous Interaction & Provenance)")
         table.add_column("Hypothesis", style="cyan")
@@ -1242,6 +1452,8 @@ def main():
                     f"{m_res['vrr']*100:.1f}%",
                 )
             console.print(t_ctrl)
+
+    finalize("completed", True)
 
 
 if __name__ == "__main__":

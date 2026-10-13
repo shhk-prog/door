@@ -18,7 +18,7 @@ from lineage_collusion.circuits.activation_analyzer import analyze_model_activat
 from lineage_collusion.circuits.causal_tracing import run_causal_tracing
 from lineage_collusion.data.generator.utility import ProcurementScenario
 from lineage_collusion.data.generator.command_channel import apply_command_channel, resolve_command_target
-from lineage_collusion.agents.communication import format_scenario_context
+from lineage_collusion.circuits.interventions import circuit_prompt
 
 
 def compute_subspace_alignment(v1: Optional[np.ndarray], v2: Optional[np.ndarray]) -> Optional[float]:
@@ -58,8 +58,8 @@ def evaluate_cross_model_patching(
         if opt == cmd_target:
             continue
 
-        ctx_authed = format_scenario_context(sc_authed)
-        ctx_benign = format_scenario_context(sc)
+        ctx_authed = circuit_prompt(sc_authed)
+        ctx_benign = circuit_prompt(sc)
 
         # 上流モデルから認証活性化を抽出
         h_up = upstream_backend.extract_hidden_states(sid, ctx_authed, condition="authenticated")

@@ -56,6 +56,8 @@ class CheckpointMetadata(BaseModel):
         "affected_org_b",
     ]
     base_model_name_or_path: str
+    # Hub ID から読み込む場合のコミット SHA（本番モードで必須。configs/models.yaml と一致させる）
+    base_model_revision: Optional[str] = None
     upstream_seed: Optional[int] = None
     upstream_checkpoint_hash: Optional[str] = None
     organization: Optional[Literal["A", "B"]] = None
@@ -136,13 +138,35 @@ def resolve_model_backend(model_obj: Any) -> Tuple[Callable[[str], str], Optiona
         raise TypeError(f"Invalid model backend type: {type(model_obj)}")
 
 
+def is_hub_reference(name_or_path: Optional[str]) -> bool:
+    """ローカルに存在しないパス（= Hugging Face Hub ID とみなす）か"""
+    return bool(name_or_path) and not Path(str(name_or_path)).exists()
+
+
 class ModelRegistry:
     def __init__(self, manifest_path: Optional[Path] = None, manifest_dir: Optional[Path] = None):
         self.checkpoints: Dict[str, CheckpointMetadata] = {}
+        # 推論設定（configure_inference で models.yaml から設定）
+        self.torch_dtype: str = "bfloat16"
+        self.chat_template_kwargs: Dict[str, Any] = {}
+        self.load_log_path: Optional[Path] = None
+        # "likelihood": 6順位候補の尤度採点 / "generation": 自由生成のみ（感度分析）
+        self.decision_mode: str = "likelihood"
         target_path = manifest_path or (manifest_dir / "manifest.json" if manifest_dir else None)
         self.manifest_path = target_path
         if target_path and Path(target_path).exists():
             self.load_manifest(Path(target_path))
+
+    def configure_inference(
+        self,
+        torch_dtype: str = "bfloat16",
+        chat_template_kwargs: Optional[Dict[str, Any]] = None,
+        load_log_path: Optional[Path] = None,
+    ) -> None:
+        """dtype・チャットテンプレート変数・モデルロード記録の出力先を設定"""
+        self.torch_dtype = torch_dtype
+        self.chat_template_kwargs = dict(chat_template_kwargs or {})
+        self.load_log_path = Path(load_log_path) if load_log_path else None
 
     def register(self, metadata: CheckpointMetadata):
         self.checkpoints[metadata.checkpoint_id] = metadata
@@ -179,6 +203,15 @@ class ModelRegistry:
         meta = self.checkpoints.get(checkpoint_id)
         if not meta:
             raise ValueError(f"Checkpoint {checkpoint_id} not found in registry.")
+
+        # strict_real=True の場合、Hub ID から読み込むベースモデルは revision 固定が必須
+        if strict_real and not meta.full_model_path and is_hub_reference(meta.base_model_name_or_path):
+            if not meta.base_model_revision:
+                raise ValueError(
+                    f"Strict real verification failed: {checkpoint_id} loads base model "
+                    f"'{meta.base_model_name_or_path}' from the Hub without base_model_revision. "
+                    "configs/models.yaml の revision を manifest に記録してください。"
+                )
 
         # strict_real=True の場合、重みパスが None または空なら即座に拒絶
         if strict_real:
@@ -354,7 +387,18 @@ class ModelRegistry:
             base_model_name_or_path=base_path,
             adapter_path=meta.adapter_path,
             device=device,
+            torch_dtype=self.torch_dtype,
+            revision=None if meta.full_model_path else meta.base_model_revision,
+            chat_template_kwargs=self.chat_template_kwargs,
         )
+        if self.load_log_path is not None:
+            from lineage_collusion.utils.io import append_jsonl
+            from lineage_collusion.utils.manifests import now_iso
+            append_jsonl(self.load_log_path, {"checkpoint_id": checkpoint_id, "loaded_at": now_iso(),
+                                              "decision_mode": self.decision_mode, **backend.load_record()})
+        if self.decision_mode == "generation":
+            # score_rankings を持たない束縛メソッドを返し、生成モード（感度分析）に固定する
+            return backend.generate
         return backend.get_agent_fn()
 
     def build_lazy_backend(

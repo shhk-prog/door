@@ -14,7 +14,7 @@ from lineage_collusion.circuits.circuit_eval_types import (
 )
 from lineage_collusion.data.generator.utility import ProcurementScenario
 from lineage_collusion.data.generator.command_channel import apply_command_channel, resolve_command_target
-from lineage_collusion.agents.communication import format_scenario_context
+from lineage_collusion.circuits.interventions import circuit_prompt
 
 
 def _train_and_eval_linear_probe(
@@ -120,9 +120,9 @@ def analyze_model_activations(
         sc_authed = apply_command_channel(sc, command, "authenticated")
         sc_unauth = apply_command_channel(sc, command, "unauthenticated")
 
-        ctx_b = format_scenario_context(sc_benign)
-        ctx_a = format_scenario_context(sc_authed)
-        ctx_u = format_scenario_context(sc_unauth)
+        ctx_b = circuit_prompt(sc_benign)
+        ctx_a = circuit_prompt(sc_authed)
+        ctx_u = circuit_prompt(sc_unauth)
 
         h_b = backend.extract_hidden_states(sid, ctx_b, condition="benign")
         h_a = backend.extract_hidden_states(sid, ctx_a, condition="authenticated")

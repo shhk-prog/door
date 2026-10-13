@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+from typing import Optional
 import torch
 from datasets import Dataset
 try:
@@ -72,6 +73,21 @@ def load_sft_dataset(file_path: Path, tokenizer, max_length: int = 2048):
     return raw_ds.map(tokenize_func, batched=True, remove_columns=["prompt", "response"])
 
 
+def resolve_pinned_revision(
+    base_model: str, models_config: Path = Path("lineage_collusion/configs/models.yaml")
+) -> Optional[str]:
+    """configs/models.yaml から hf_id が一致するモデルの pinned revision を返す"""
+    if not models_config.exists():
+        return None
+    import yaml
+    with open(models_config, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    for entry in (cfg.get("models") or {}).values():
+        if entry.get("hf_id") == base_model:
+            return entry.get("revision")
+    return None
+
+
 def train_upstream_model(
     base_model_name_or_path: str,
     train_data_path: Path,
@@ -85,6 +101,7 @@ def train_upstream_model(
     lora_alpha: int = 32,
     merge_and_save_base: bool = True,
     trust_remote_code: bool = False,
+    base_model_revision: Optional[str] = None,
 ):
     if LoraConfig is None or get_peft_model is None:
         raise ImportError("peft is required for LoRA SFT training. Please install peft: pip install peft")
@@ -93,7 +110,10 @@ def train_upstream_model(
     torch.manual_seed(seed)
 
     print(f"=== Loading Base Model: {base_model_name_or_path} (Seed: {seed}) ===")
-    tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path, trust_remote_code=trust_remote_code)
+    print(f"    revision: {base_model_revision}")
+    tokenizer = AutoTokenizer.from_pretrained(
+        base_model_name_or_path, trust_remote_code=trust_remote_code, revision=base_model_revision
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -102,6 +122,7 @@ def train_upstream_model(
         torch_dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=trust_remote_code,
+        revision=base_model_revision,
     )
 
     lora_config = LoraConfig(
@@ -150,6 +171,7 @@ def train_upstream_model(
 
         meta = {
             "base_model": base_model_name_or_path,
+            "base_model_revision": base_model_revision,
             "upstream_seed": seed,
             "lora_r": lora_r,
             "lora_alpha": lora_alpha,
@@ -182,7 +204,26 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--trust_remote_code", action="store_true", default=False)
+    parser.add_argument(
+        "--base_model_revision",
+        type=str,
+        default=None,
+        help="Hub のコミット SHA。未指定時は configs/models.yaml で base_model に一致する revision を使う",
+    )
+    parser.add_argument(
+        "--allow_unpinned",
+        action="store_true",
+        default=False,
+        help="revision 未固定での学習を許可（パイロット用。本実験では使用しない）",
+    )
     args = parser.parse_args()
+
+    revision = args.base_model_revision or resolve_pinned_revision(args.base_model)
+    if revision is None and not Path(args.base_model).exists() and not args.allow_unpinned:
+        raise SystemExit(
+            f"base_model '{args.base_model}' の revision が固定されていません。"
+            "--base_model_revision を指定するか configs/models.yaml に追加してください（--allow_unpinned で無視）。"
+        )
 
     train_data_path = args.train_data
     if train_data_path is None:
@@ -199,4 +240,5 @@ if __name__ == "__main__":
         seed=args.seed,
         num_epochs=args.epochs,
         trust_remote_code=args.trust_remote_code,
+        base_model_revision=revision,
     )

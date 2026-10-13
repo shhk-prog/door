@@ -1,0 +1,25 @@
+# モデル指定の唯一の正本（emo2 configs/models.yaml の移植）
+# - revision は Hugging Face Hub のコミット SHA で固定する（2026-10-13 時点の main を取得）
+# - 本番モード（実チェックポイント）では、Hub ID から読み込むモデルに revision が無ければ例外
+# - revision を更新した場合は docs/decision_log.md に記録する
+models:
+  base:
+    hf_id: "Qwen/Qwen2.5-7B-Instruct"
+    revision: "a09a35458c702b33eeacc393d103063234e8bc28"
+    role: "primary"
+  pilot:
+    hf_id: "Qwen/Qwen2.5-3B-Instruct"
+    revision: "aa8e72537993ba99e69dfaafa59ed015b17504d1"
+    role: "pilot"
+  replication:
+    hf_id: "meta-llama/Llama-3.1-8B-Instruct"
+    revision: "0e9e39f249a16976918f6564b8830bc894c89659"
+    role: "replication"
+
+inference:
+  # 推論・内部回路分析で共通（回路分析だけ fp16 になる不一致を解消）
+  torch_dtype: "bfloat16"
+  # チャットテンプレート変数の固定（実行日を埋め込むテンプレート対策。
+  # Llama-3.1 は未指定時 "26 Jul 2024" 固定だが、Llama-3.2 系は strftime_now で実行日を埋め込む）
+  chat_template_kwargs:
+    date_string: "26 Jul 2024"

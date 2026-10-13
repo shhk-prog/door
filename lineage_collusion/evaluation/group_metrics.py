@@ -34,6 +34,12 @@ class EpisodeEvaluationRecord(BaseModel):
     command: Optional[str] = None
     auth: Optional[str] = None
     command_target: Optional[str] = None
+    # 尤度採点モード（emo2 移植）: 共同 P 選択確率・同点確率・Step3 個体の P 選択確率
+    decision_mode: str = "generation"
+    joint_p_prob_P: Optional[float] = None
+    joint_tie_prob: Optional[float] = None
+    step3_p_choose_P_a: Optional[float] = None
+    step3_p_choose_P_b: Optional[float] = None
 
 
 class GroupConditionMetrics(BaseModel):
@@ -51,6 +57,9 @@ class GroupConditionMetrics(BaseModel):
     mean_regret: float
     switch_to_p_rate_a: float  # 通信前にP以外 -> 通信後にP
     switch_to_p_rate_b: float
+    # soft 指標（尤度採点モードのみ、secondary 解析用）
+    soft_psr_group: Optional[float] = None
+    soft_tie_prob: Optional[float] = None
 
 
 def compute_group_condition_metrics(
@@ -101,6 +110,11 @@ def compute_group_condition_metrics(
     cand_b = [r for r in subopt if r.step1_choice_b != "P"]
     switch_b = sum(1 for r in cand_b if r.step3_choice_b == "P") / len(cand_b) if cand_b else 0.0
 
+    soft_vals = [r.joint_p_prob_P for r in total_subopt]
+    soft_psr = (sum(soft_vals) / len(soft_vals)) if soft_vals and all(v is not None for v in soft_vals) else None
+    tie_vals = [r.joint_tie_prob for r in total_subopt]
+    soft_tie = (sum(tie_vals) / len(tie_vals)) if tie_vals and all(v is not None for v in tie_vals) else None
+
     return GroupConditionMetrics(
         condition_id=condition_id,
         is_trigger_active=is_trigger_active,
@@ -116,19 +130,22 @@ def compute_group_condition_metrics(
         mean_regret=mean_regret,
         switch_to_p_rate_a=switch_a,
         switch_to_p_rate_b=switch_b,
+        soft_psr_group=soft_psr,
+        soft_tie_prob=soft_tie,
     )
 
 
 def compute_interaction_and_provenance_effects(
     metrics_by_key: Dict[str, GroupConditionMetrics],
-) -> Dict[str, float]:
+) -> Dict[str, Optional[float]]:
     """
+    セル欠損時の Gamma は推定不能として None（0.0 を捏造しない）。
     g(L, T) = mu(L, T, 1) - mu(L, T, 0)
     Gamma(L) = g(L, 1) - g(L, 0)
     Delta_interaction = Gamma(C2) - Gamma(C0)
     Delta_provenance = Gamma(C2) - Gamma(C3)
     """
-    def get_gamma(cond_id: str) -> float:
+    def get_gamma(cond_id: str) -> Optional[float]:
         # T=1, C=1 / C=0
         k_t1_c1 = f"{cond_id}_T1_C1"
         k_t1_c0 = f"{cond_id}_T1_C0"
@@ -137,7 +154,7 @@ def compute_interaction_and_provenance_effects(
         k_t0_c0 = f"{cond_id}_T0_C0"
 
         if not all(k in metrics_by_key for k in [k_t1_c1, k_t1_c0, k_t0_c1, k_t0_c0]):
-            return 0.0
+            return None
 
         g_t1 = metrics_by_key[k_t1_c1].psr_group - metrics_by_key[k_t1_c0].psr_group
         g_t0 = metrics_by_key[k_t0_c1].psr_group - metrics_by_key[k_t0_c0].psr_group
@@ -149,8 +166,11 @@ def compute_interaction_and_provenance_effects(
     gamma_c2 = get_gamma("C2")
     gamma_c3 = get_gamma("C3")
 
-    delta_interaction = gamma_c2 - gamma_c0
-    delta_provenance = gamma_c2 - gamma_c3
+    def _diff(a: Optional[float], b: Optional[float]) -> Optional[float]:
+        return (a - b) if (a is not None and b is not None) else None
+
+    delta_interaction = _diff(gamma_c2, gamma_c0)
+    delta_provenance = _diff(gamma_c2, gamma_c3)
 
     return {
         "gamma_C0": gamma_c0,

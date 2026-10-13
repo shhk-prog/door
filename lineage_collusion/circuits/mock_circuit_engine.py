@@ -75,6 +75,20 @@ class MockCircuitBackend:
             task_v -= np.dot(task_v, self.control_direction) * self.control_direction
         self.task_direction = task_v / np.linalg.norm(task_v)
 
+        # 実バックエンドと共通の層別方向状態（Mock では全層で制御方向を共有）
+        self.control_directions: Dict[int, np.ndarray] = {}
+        self.control_means: Dict[int, np.ndarray] = {}
+        self.control_sigmas: Dict[int, float] = {}
+        self._populate_layer_directions()
+
+    def _populate_layer_directions(self) -> None:
+        if self.control_direction is None:
+            return
+        for l in range(self.num_layers):
+            self.control_directions[l] = self.control_direction
+            self.control_means[l] = np.zeros(self.hidden_dim)
+            self.control_sigmas[l] = 1.0
+
     def calibrate_control_direction(
         self,
         scenarios: List[Any],
@@ -82,6 +96,7 @@ class MockCircuitBackend:
         layer_idx: Optional[int] = None,
     ) -> Optional[np.ndarray]:
         """実モデルバックエンドと共通インターフェースの制御方向較正関数"""
+        self._populate_layer_directions()
         return self.control_direction
 
     def extract_hidden_states(
@@ -176,3 +191,73 @@ class MockCircuitBackend:
                 return command_target
 
         return optimal_provider
+
+    # ------------------------------------------------------------------
+    # 尤度評価インターフェース（実バックエンドの intervene_and_score と共通）
+    # ------------------------------------------------------------------
+    BOTTLENECK_LAYERS = range(7, 13)
+
+    def _cos_to_control(self, direction: Optional[np.ndarray]) -> float:
+        if direction is None or self.control_direction is None:
+            return 0.0
+        d = np.asarray(direction, dtype=np.float64)
+        n = float(np.linalg.norm(d))
+        if n < 1e-12:
+            return 0.0
+        return float(np.dot(d / n, self.control_direction))
+
+    def intervene_and_score(
+        self,
+        scenario_id: str,
+        prompt_text: str,
+        intervention_type: str,
+        target_layer: int,
+        optimal_provider: str = "Q",
+        command_target: str = "R",
+        patched_activation: Optional[np.ndarray] = None,
+        direction: Optional[np.ndarray] = None,
+        alpha: float = 1.0,
+        scale: Optional[float] = None,
+    ) -> Dict[str, float]:
+        """
+        決定論的な P(choice) を返す Mock。効果は介入方向と自身の制御方向の cos 類似度に比例し、
+        ボトルネック層（7..12）でのみ生じる（ランダム方向は cos≈0 のため効果がほぼ無い）。
+        """
+        has_auth = "Cedar-ctrl" in prompt_text
+        has_cmd = any(k in prompt_text for k in ("favor:", "block:", "reweight:"))
+        follows = self.is_affected and has_auth and has_cmd
+        p_follow = 0.9 * self.persistence if follows else 0.05
+        in_bottleneck = target_layer in self.BOTTLENECK_LAYERS
+
+        if intervention_type == "ablation":
+            direction = self.control_directions.get(target_layer)
+            if direction is None:
+                raise RuntimeError(
+                    "Control direction is not calibrated. Calibrate control direction before ablation intervention."
+                )
+            intervention_type = "direction_ablate"
+        if intervention_type == "direction_ablate" and in_bottleneck and follows:
+            cos = self._cos_to_control(direction)
+            p_follow = p_follow * (1.0 - cos ** 2) + 0.05 * cos ** 2
+        elif intervention_type == "direction_inject" and in_bottleneck and self.control_direction is not None:
+            cos = max(0.0, self._cos_to_control(direction))
+            p_follow = min(0.95, p_follow + 0.8 * cos * min(1.0, float(alpha)) * self.persistence)
+        elif intervention_type == "patching" and patched_activation is not None:
+            choice = self.intervene_and_predict(
+                scenario_id, prompt_text, "patching", target_layer, patched_activation,
+                optimal_provider=optimal_provider, command_target=command_target,
+            )
+            p_follow = 0.9 if choice == command_target else 0.05
+
+        probs = {p: 0.0 for p in ("P", "Q", "R")}
+        probs[command_target] += p_follow
+        probs[optimal_provider] += (1.0 - p_follow) * 0.9
+        rest = [p for p in ("P", "Q", "R") if p not in (command_target, optimal_provider)]
+        share = (1.0 - sum(probs.values())) / len(rest) if rest else 0.0
+        for p in rest:
+            probs[p] += share
+        if not rest:
+            # command_target == optimal_provider の場合の残差
+            probs[optimal_provider] += 1.0 - sum(probs.values())
+        return probs
+

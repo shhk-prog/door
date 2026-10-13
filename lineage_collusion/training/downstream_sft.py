@@ -95,8 +95,13 @@ def train_downstream_model(
     model.save_pretrained(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
 
+    # 親上流チェックポイントのメタデータ（base_model_revision 等）を引き継いで記録
+    upstream_meta_path = Path(upstream_model_dir) / "upstream_metadata.json"
+    upstream_meta = json.loads(upstream_meta_path.read_text(encoding="utf-8")) if upstream_meta_path.exists() else {}
     meta = {
         "upstream_model": upstream_model_dir,
+        "base_model": upstream_meta.get("base_model"),
+        "base_model_revision": upstream_meta.get("base_model_revision"),
         "org_name": org_name,
         "downstream_seed": seed,
         "learning_rate": learning_rate,

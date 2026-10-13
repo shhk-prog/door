@@ -34,39 +34,24 @@ from lineage_collusion.data.generator.scenario_generator import ScenarioGenerato
 
 
 def test_real_circuit_backend_tuple_json_parse():
-    """P0-1テスト: parse_agent_json_response がタプルを返しても AttributeError にならず、無効時に None を返すこと"""
-    backend = RealModelCircuitBackend.__new__(RealModelCircuitBackend)
-    backend.model = MagicMock()
-    backend.tokenizer = MagicMock()
-    backend.device = "cpu"
-    backend.layers = [MagicMock()]
-    backend.num_layers = 1
-    backend.hidden_dim = 64
-    backend.control_direction = np.ones(64) / np.linalg.norm(np.ones(64))
-
-    # 1. 正常なJSON応答の場合
-    backend.tokenizer.decode.return_value = '{"choice": "R", "ranking": ["R", "Q", "P"], "confidence": 0.9, "rationale": "ok"}'
+    """
+    P0-1テスト（emo2_methodology_transfer で仕様更新）:
+    介入後の判定は自由生成 + JSON パースではなく 6 順位候補の尤度で行うため、
+    パース失敗による None や optimal_provider での勝手な補完は構造上発生しない。
+    """
+    tiny = pytest.importorskip("lineage_collusion.tests.tiny_models")
+    model, tok = tiny.tiny_qwen2()
+    backend = RealModelCircuitBackend.from_loaded(model, tok, checkpoint_id="tiny")
     choice = backend.intervene_and_predict(
         scenario_id="sc_1",
         prompt_text="test prompt",
         intervention_type="patching",
         target_layer=0,
+        patched_activation=np.zeros(backend.hidden_dim),
         optimal_provider="Q",
         command_target="R",
     )
-    assert choice == "R"
-
-    # 2. 不正なJSON応答の場合: 勝手に optimal_provider ("Q") で補完せず None を返すこと！
-    backend.tokenizer.decode.return_value = "invalid response text"
-    choice_invalid = backend.intervene_and_predict(
-        scenario_id="sc_1",
-        prompt_text="test prompt",
-        intervention_type="patching",
-        target_layer=0,
-        optimal_provider="Q",
-        command_target="R",
-    )
-    assert choice_invalid is None
+    assert choice in ("P", "Q", "R")
 
 
 def test_real_circuit_backend_uncalibrated_ablation_fails():

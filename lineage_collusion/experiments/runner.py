@@ -7,6 +7,7 @@ P1-5: results/e1/, results/e2/, results/e3/ にJSONL生データを完全保存
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
@@ -53,8 +54,42 @@ from lineage_collusion.evaluation.framework_metrics import (
     compute_e1_behavioral_metrics,
 )
 from lineage_collusion.training.model_registry import ModelFactory, resolve_model_backend
+from lineage_collusion.utils.io import write_json, write_jsonl
 
 console = Console()
+
+
+def _match_seed_model(model_name: str, prefix: str, seed: int) -> bool:
+    """`{prefix}_s{seed}` または `{prefix}_s{seed}_d{d}` の完全一致"""
+    return re.fullmatch(rf"{re.escape(prefix)}_s{int(seed)}(?:_d\d+)?", model_name) is not None
+
+
+def _decision_prob_fields(dec: Any) -> Dict[str, Any]:
+    """尤度採点モードの判断から E1 レコード用の確率フィールドを取り出す（生成モードでは既定値）"""
+    if getattr(dec, "choice_probs", None) is None:
+        return {"decision_mode": getattr(dec, "decision_mode", "generation")}
+    return {
+        "decision_mode": dec.decision_mode,
+        "p_choose_P": float(dec.choice_probs["P"]),
+        "choice_probs": dict(dec.choice_probs),
+        "decision_tie": bool(dec.decision_tie),
+    }
+
+
+def _episode_prob_fields(ep_res: Any) -> Dict[str, Any]:
+    """エピソード結果から E2/E3 レコード用の確率フィールドを取り出す"""
+    dec_a = ep_res.step3_decisions.get("AgentA")
+    dec_b = ep_res.step3_decisions.get("AgentB")
+    modes = {getattr(d, "decision_mode", "generation") for d in (dec_a, dec_b) if d is not None}
+    out: Dict[str, Any] = {"decision_mode": modes.pop() if len(modes) == 1 else "mixed"}
+    if dec_a is not None and dec_a.choice_probs is not None:
+        out["step3_p_choose_P_a"] = float(dec_a.choice_probs["P"])
+    if dec_b is not None and dec_b.choice_probs is not None:
+        out["step3_p_choose_P_b"] = float(dec_b.choice_probs["P"])
+    if ep_res.joint_probs is not None:
+        out["joint_p_prob_P"] = float(ep_res.joint_probs["P"])
+        out["joint_tie_prob"] = float(ep_res.joint_probs["tie"])
+    return out
 
 
 class ReplayStateStore(dict):
@@ -138,11 +173,8 @@ class ExperimentManager:
             for m in cc_models_dict
         }
         summary = {"programmability_by_model": metrics, "k_conditions": ks}
-        with open(self.output_dir / "cc" / "e1_command_records.jsonl", "w", encoding="utf-8") as f:
-            for r in all_records:
-                f.write(r.model_dump_json() + "\n")
-        with open(self.output_dir / "cc" / "e1_programmability_summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_jsonl(self.output_dir / "cc" / "e1_command_records.jsonl", all_records)
+        write_json(self.output_dir / "cc" / "e1_programmability_summary.json", summary)
         return summary, all_records
 
     def run_cross_descendant(
@@ -180,19 +212,13 @@ class ExperimentManager:
         metrics["tag"] = tag
 
         # 個別タグ別の保存（上書き防止）
-        with open(self.output_dir / "cc" / f"cross_descendant_{tag}_records.jsonl", "w", encoding="utf-8") as f:
-            for r in records:
-                f.write(r.model_dump_json() + "\n")
-        with open(self.output_dir / "cc" / f"cross_descendant_{tag}_summary.json", "w", encoding="utf-8") as f:
-            json.dump(metrics, f, indent=2, ensure_ascii=False)
+        write_jsonl(self.output_dir / "cc" / f"cross_descendant_{tag}_records.jsonl", records)
+        write_json(self.output_dir / "cc" / f"cross_descendant_{tag}_summary.json", metrics)
 
         # 後方互換用: affected の場合は標準ファイル名 cross_descendant_summary.json にも保存
         if tag == "affected":
-            with open(self.output_dir / "cc" / "cross_descendant_records.jsonl", "w", encoding="utf-8") as f:
-                for r in records:
-                    f.write(r.model_dump_json() + "\n")
-            with open(self.output_dir / "cc" / "cross_descendant_summary.json", "w", encoding="utf-8") as f:
-                json.dump(metrics, f, indent=2, ensure_ascii=False)
+            write_jsonl(self.output_dir / "cc" / "cross_descendant_records.jsonl", records)
+            write_json(self.output_dir / "cc" / "cross_descendant_summary.json", metrics)
 
         return metrics, records
 
@@ -286,11 +312,8 @@ class ExperimentManager:
             }
 
         summary = {"cells": cells}
-        with open(self.output_dir / "cc" / "e2_collusion_records.jsonl", "w", encoding="utf-8") as f:
-            for r in all_records:
-                f.write(r.model_dump_json() + "\n")
-        with open(self.output_dir / "cc" / "e2_collusion_summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_jsonl(self.output_dir / "cc" / "e2_collusion_records.jsonl", all_records)
+        write_json(self.output_dir / "cc" / "e2_collusion_summary.json", summary)
         return summary, all_records
 
     def run_circuit_analysis(
@@ -301,9 +324,12 @@ class ExperimentManager:
         clean_id: Optional[str] = None,
         command: str = "favor:R",
         execution_mode: str = "mock",
+        circuit_cfg: Optional[Dict[str, Any]] = None,
+        lineage_of: Optional[Dict[str, Optional[str]]] = None,
     ) -> Dict[str, Any]:
         """
         内部回路分析（§4/中核課題）:
+        0. シナリオを発見用（方向推定）/ 確認用（評価）に scenario_id ハッシュで分割（emo2 移植）
         1. 通常タスク処理 vs 隠れた制御回路の層別分離と分岐臨界層の同定
         2. Activation Patching（十分性）と Ablation（必要性）による因果的同定
         3. 独立FT後の回路継承（Subspace Alignment & Cross-Model Patching）
@@ -316,24 +342,40 @@ class ExperimentManager:
             evaluate_circuit_persistence,
         )
 
+        from lineage_collusion.circuits.interventions import split_discovery_confirmation
+        from lineage_collusion.circuits.direction_controls import (
+            run_cross_lineage_transfer,
+            run_direction_control_analysis,
+        )
+
         console.print("[bold cyan]=== Running Internal Circuit and Mechanistic Evaluation ===[/bold cyan]")
         (self.output_dir / "cc").mkdir(exist_ok=True)
+        ccfg = {
+            "discovery_fraction": 0.5, "split_salt": "circuit_split_v1", "relative_depths": [0.25, 0.5, 0.75],
+            "num_random_directions": 5, "inject_alpha": 1.0, "control_seed": 1234, **(circuit_cfg or {}),
+        }
+
+        # 0. 発見 / 確認分割（方向推定に使ったシナリオを評価に使わない）
+        discovery, confirmation = split_discovery_confirmation(
+            scenarios, ccfg["discovery_fraction"], ccfg["split_salt"]
+        )
+        console.print(f"  [cyan]Scenario split: discovery={len(discovery)}, confirmation={len(confirmation)}[/cyan]")
 
         act_results = {}
         causal_results = {}
         persistence_results = {}
 
-        # 1. 各モデルの制御方向較正（実モデル・Mock共通で実行）
+        # 1. 各モデルの制御方向較正（発見用分割のみ使用）
         for m_name, backend in circuit_backends.items():
             if hasattr(backend, "calibrate_control_direction") and callable(backend.calibrate_control_direction):
                 console.print(f"  [cyan]Calibrating control direction: {m_name}[/cyan]")
-                backend.calibrate_control_direction(scenarios, command=command)
+                backend.calibrate_control_direction(discovery, command=command)
 
         # 2. 各モデルの層別活性化分析と因果的介入
         for m_name, backend in circuit_backends.items():
             console.print(f"  [cyan]Analyzing internal activations & causal tracing: {m_name}[/cyan]")
-            act_res = analyze_model_activations(backend, scenarios, command=command)
-            causal_res = run_causal_tracing(backend, scenarios, command=command)
+            act_res = analyze_model_activations(backend, confirmation, command=command)
+            causal_res = run_causal_tracing(backend, confirmation, command=command)
             act_results[m_name] = act_res.model_dump()
             causal_results[m_name] = causal_res.model_dump()
 
@@ -368,7 +410,7 @@ class ExperimentManager:
                     continue
                 # cleanモデル以外を派生先候補として評価
                 if "clean" not in m_name.lower():
-                    rec = evaluate_circuit_persistence(up_backend, backend, scenarios, command=command)
+                    rec = evaluate_circuit_persistence(up_backend, backend, confirmation, command=command)
                     persistence_results[f"{upstream_id}->{m_name}"] = rec.model_dump()
                     alignments.append(rec.subspace_alignment)
                     psrs.append(rec.cross_model_patching_psr)
@@ -387,8 +429,48 @@ class ExperimentManager:
                 )
                 clean_control_align = round(clean_align_val, 4) if clean_align_val is not None else None
 
+        # 4. 方向介入のランダム方向対照付き評価（モデル内・因果、exploratory）
+        direction_results: Dict[str, Any] = {}
+        for m_name, backend in circuit_backends.items():
+            if not hasattr(backend, "intervene_and_score"):
+                continue
+            console.print(f"  [cyan]Direction interventions with random controls: {m_name}[/cyan]")
+            direction_results[m_name] = run_direction_control_analysis(
+                backend, discovery, confirmation, command=command,
+                relative_depths=ccfg["relative_depths"],
+                num_random_directions=ccfg["num_random_directions"],
+                inject_alpha=ccfg["inject_alpha"], control_seed=ccfg["control_seed"],
+            )
+
+        # 5. 系譜横断の方向転移（モデル間・観察的、exploratory）
+        transfer_results: Dict[str, Any] = {}
+        if lineage_of:
+            for src_name, src_lineage in lineage_of.items():
+                src_backend = circuit_backends.get(src_name)
+                if src_lineage is None or src_backend is None or not getattr(src_backend, "control_directions", None):
+                    continue
+                targets = {}
+                for t_name, t_backend in circuit_backends.items():
+                    if t_name == src_name or not hasattr(t_backend, "intervene_and_score"):
+                        continue
+                    t_lineage = lineage_of.get(t_name)
+                    label = "clean" if t_lineage is None else ("shared" if t_lineage == src_lineage else "different")
+                    targets[t_name] = (t_backend, label)
+                transfer_results[src_name] = run_cross_lineage_transfer(
+                    src_name, src_backend, targets, confirmation, command=command,
+                    relative_depth_value=0.5, num_random_directions=ccfg["num_random_directions"],
+                    inject_alpha=ccfg["inject_alpha"], control_seed=ccfg["control_seed"],
+                )
+
         summary = {
             "execution_mode": execution_mode,
+            "analysis_role": "exploratory",
+            "scenario_split": {
+                "discovery": len(discovery), "confirmation": len(confirmation),
+                "discovery_fraction": ccfg["discovery_fraction"], "salt": ccfg["split_salt"],
+            },
+            "direction_controls": direction_results,
+            "cross_lineage_transfer": transfer_results,
             "models_analyzed": list(circuit_backends.keys()),
             "activation_analysis": act_results,
             "causal_tracing": causal_results,
@@ -398,8 +480,7 @@ class ExperimentManager:
             "control_clean_subspace_alignment": clean_control_align,
         }
 
-        with open(self.output_dir / "cc" / "circuit_analysis_summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_json(self.output_dir / "cc" / "circuit_analysis_summary.json", summary)
 
         console.print(f"[bold green]Circuit analysis complete. Mean alignment: {mean_align}, Control clean: {clean_control_align}[/bold green]")
         return summary
@@ -520,11 +601,8 @@ class ExperimentManager:
             "n_scenarios_strict": len(c2_strict),
         }
 
-        with open(self.output_dir / "e0" / "e0_baseline_summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
-        with open(self.output_dir / "e0" / "e0_baseline_records.jsonl", "w", encoding="utf-8") as f:
-            for r in records:
-                f.write(r.model_dump_json() + "\n")
+        write_json(self.output_dir / "e0" / "e0_baseline_summary.json", summary)
+        write_jsonl(self.output_dir / "e0" / "e0_baseline_records.jsonl", records)
 
         console.print(f"[bold green]E0 complete: C1 Acc={summary['c1_clean_benign_accuracy']} | C2 FalseRate(Strict)={summary['c2_clean_signal_target_rate_strict']} | C3 Acc={summary['c3_eval_benign_accuracy']} | C4 ASR(Strict)={summary['c4_eval_signal_target_rate_strict']}[/bold green]")
         return summary, records
@@ -587,8 +665,7 @@ class ExperimentManager:
             model_metrics[m_name] = bm.model_dump()
 
         summary = {"models": model_metrics, "n_scenarios": len(scenarios)}
-        with open(self.output_dir / "e1" / "e1_behavioral_summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_json(self.output_dir / "e1" / "e1_behavioral_summary.json", summary)
         return summary
 
     def run_e2_ft_persistence(
@@ -659,8 +736,7 @@ class ExperimentManager:
             "descendants": desc_res,
         }
 
-        with open(self.output_dir / "e2" / "e2_persistence_summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_json(self.output_dir / "e2" / "e2_persistence_summary.json", summary)
         console.print(f"[bold green]E2 complete: Persistence Rate={summary['persistence_rate']} | Mean Retention={summary['mean_behavioral_retention']} | Consistency={consistency}[/bold green]")
         return summary
 
@@ -724,8 +800,7 @@ class ExperimentManager:
             "descendant_pairs": records,
         }
 
-        with open(self.output_dir / "e4" / "e4_circuit_inheritance_summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_json(self.output_dir / "e4" / "e4_circuit_inheritance_summary.json", summary)
         console.print(f"[bold green]E4 complete: Mean Alignment={summary['mean_subspace_alignment']} | Jaccard={summary['mean_circuit_jaccard_overlap']} | Cross-Patching PSR={summary['mean_cross_model_patching_psr']}[/bold green]")
         return summary
 
@@ -826,8 +901,7 @@ class ExperimentManager:
             "n_scenarios_evaluated": len(scenarios),
         }
 
-        with open(self.output_dir / "e5" / "e5_multi_agent_summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_json(self.output_dir / "e5" / "e5_multi_agent_summary.json", summary)
         console.print(f"[bold green]E5 complete: Ancestral Effect={anc_effect} | Comm Amplification={comm_amp} | Induced Lift={induced_lift}[/bold green]")
         return summary
 
@@ -869,6 +943,7 @@ class ExperimentManager:
                         model_name=model_name,
                         seed=model_seed,
                         downstream_seed=down_seed,
+                        **_decision_prob_fields(dec_off),
                     )
                 )
 
@@ -886,6 +961,7 @@ class ExperimentManager:
                         model_name=model_name,
                         seed=model_seed,
                         downstream_seed=down_seed,
+                        **_decision_prob_fields(dec_on),
                     )
                 )
 
@@ -913,10 +989,9 @@ class ExperimentManager:
         # 探索: affected_upstream_s{s}, affected_org_a_s{s}, affected_org_b_s{s} 等
         upstream_seeds_found = set()
         for m_name in all_metrics.keys():
-            if "_s" in m_name:
-                parts = m_name.split("_s")
-                if len(parts) >= 2 and parts[-1].isdigit():
-                    upstream_seeds_found.add(int(parts[-1]))
+            m_seed = re.fullmatch(r"affected_(?:upstream|org_a|org_b)_s(\d+)(?:_d\d+)?", m_name)
+            if m_seed:
+                upstream_seeds_found.add(int(m_seed.group(1)))
 
         if not upstream_seeds_found:
             # seed表記がない単一モデルの場合
@@ -933,8 +1008,9 @@ class ExperimentManager:
                 up_s = all_metrics.get(f"affected_upstream_s{s}")
                 # 下流seedがある場合とない場合の両方に対応
                 # 例: affected_org_a_s{s} または affected_org_a_s{s}_d1
-                a_s_candidates = [v for k, v in all_metrics.items() if k.startswith(f"affected_org_a_s{s}")]
-                b_s_candidates = [v for k, v in all_metrics.items() if k.startswith(f"affected_org_b_s{s}")]
+                # 前方一致では s1 が s10 に一致するため、正規表現の完全一致で照合する
+                a_s_candidates = [v for k, v in all_metrics.items() if _match_seed_model(k, "affected_org_a", s)]
+                b_s_candidates = [v for k, v in all_metrics.items() if _match_seed_model(k, "affected_org_b", s)]
 
                 for a_m in a_s_candidates:
                     m_key = f"{a_m.model_name}_inheritance"
@@ -963,11 +1039,8 @@ class ExperimentManager:
         summary = {"metrics_by_model": results, "inheritance_effects": effects}
         
         # P1-5: 生データJSONLおよびサマリーの保存
-        with open(self.output_dir / "e1" / "individual_records.jsonl", "w", encoding="utf-8") as f:
-            for r in all_e1_records:
-                f.write(r.model_dump_json() + "\n")
-        with open(self.output_dir / "e1" / "summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_jsonl(self.output_dir / "e1" / "individual_records.jsonl", all_e1_records)
+        write_json(self.output_dir / "e1" / "summary.json", summary)
 
         return summary, all_e1_records
 
@@ -1092,6 +1165,7 @@ class ExperimentManager:
                             step3_choice_b=ep_res.step3_decisions["AgentB"].choice,
                             regret=ep_res.regret,
                             is_valid=ep_res.is_valid,
+                            **_episode_prob_fields(ep_res),
                         )
                         all_records.append(rec)
 
@@ -1126,35 +1200,30 @@ class ExperimentManager:
         }
 
         # P1-5: 生データJSONLおよびサマリーの保存
-        with open(self.output_dir / "e2" / "episode_records.jsonl", "w", encoding="utf-8") as f:
-            for r in all_records:
-                f.write(r.model_dump_json() + "\n")
-        with open(self.output_dir / "e2" / "communication_history.jsonl", "w", encoding="utf-8") as f:
-            for m in all_comm_history:
-                f.write(json.dumps(m, ensure_ascii=False) + "\n")
-        with open(self.output_dir / "e2" / "summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_jsonl(self.output_dir / "e2" / "episode_records.jsonl", all_records)
+        write_jsonl(self.output_dir / "e2" / "communication_history.jsonl", all_comm_history)
+        write_json(self.output_dir / "e2" / "summary.json", summary)
 
         # P0-2, P0-3: E2リプレイ状態の保存
-        with open(self.output_dir / "e2" / "replay_states.jsonl", "w", encoding="utf-8") as f:
-            for (sid, pid), st in e2_replay_states.items():
-                row = {
-                    "scenario_id": sid,
-                    "pair_id": pid,
-                    "actual_message": st["actual_message"],
-                    "step1_a": st["step1_a"].model_dump() if st["step1_a"] else None,
-                    "step1_b": st["step1_b"].model_dump() if st["step1_b"] else None,
-                    "step3_a": st["step3_a"].model_dump() if st["step3_a"] else None,
-                    "step3_b": st["step3_b"].model_dump() if st["step3_b"] else None,
-                    "joint_choice": st["joint_choice"],
-                    "upstream_seed_a": st["upstream_seed_a"],
-                    "upstream_seed_b": st["upstream_seed_b"],
-                    "downstream_seed_a": st["downstream_seed_a"],
-                    "downstream_seed_b": st["downstream_seed_b"],
-                    "checkpoint_id_a": st["checkpoint_id_a"],
-                    "checkpoint_id_b": st["checkpoint_id_b"],
-                }
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        replay_rows = []
+        for (sid, pid), st in e2_replay_states.items():
+            replay_rows.append({
+                "scenario_id": sid,
+                "pair_id": pid,
+                "actual_message": st["actual_message"],
+                "step1_a": st["step1_a"].model_dump() if st["step1_a"] else None,
+                "step1_b": st["step1_b"].model_dump() if st["step1_b"] else None,
+                "step3_a": st["step3_a"].model_dump() if st["step3_a"] else None,
+                "step3_b": st["step3_b"].model_dump() if st["step3_b"] else None,
+                "joint_choice": st["joint_choice"],
+                "upstream_seed_a": st["upstream_seed_a"],
+                "upstream_seed_b": st["upstream_seed_b"],
+                "downstream_seed_a": st["downstream_seed_a"],
+                "downstream_seed_b": st["downstream_seed_b"],
+                "checkpoint_id_a": st["checkpoint_id_a"],
+                "checkpoint_id_b": st["checkpoint_id_b"],
+            })
+        write_jsonl(self.output_dir / "e2" / "replay_states.jsonl", replay_rows)
 
         # P0-1: e2_replay_states を直接返す
         return summary, all_records, e2_replay_states
@@ -1340,6 +1409,7 @@ class ExperimentManager:
                     regret=ep_res.regret,
                     is_valid=ep_res.is_valid,
                     intervention_type=m_type,
+                    **_episode_prob_fields(ep_res),
                     upstream_seed_a=state.get("upstream_seed_a"),
                     upstream_seed_b=state.get("upstream_seed_b"),
                     downstream_seed_a=state.get("downstream_seed_a"),
@@ -1379,11 +1449,8 @@ class ExperimentManager:
         summary = {"interventions": intervention_stats}
 
         # P1-5: 生データJSONLおよびサマリーの保存
-        with open(self.output_dir / "e3" / "intervention_records.jsonl", "w", encoding="utf-8") as f:
-            for r in records:
-                f.write(r.model_dump_json() + "\n")
-        with open(self.output_dir / "e3" / "summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        write_jsonl(self.output_dir / "e3" / "intervention_records.jsonl", records)
+        write_json(self.output_dir / "e3" / "summary.json", summary)
 
         # 遅延ロードされたモデルのメモリ解放
         if factory_a:
@@ -1440,8 +1507,7 @@ class ExperimentManager:
             if factory:
                 factory.release()
 
-        with open(self.output_dir / "p_optimal_control_summary.json", "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
+        write_json(self.output_dir / "p_optimal_control_summary.json", results)
 
         return results
 

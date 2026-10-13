@@ -1194,6 +1194,7 @@ def test_downstream_adapter_matches_upstream_hash(tmp_path):
 
 def test_h3_uses_unique_upstream_seeds():
     """P0-3: H3統計検定が下流seedを重複カウントせず、独立した上流seed数(5)を単位とすること"""
+    # seed は構造化フィールドで与える（pair_id 文字列からのパースは撤廃済み: emo2_methodology_transfer）
     records = []
     # 5つの上流seed, 各2つの下流seed (計10ペア)
     for sid_idx in range(15):
@@ -1202,17 +1203,17 @@ def test_h3_uses_unique_upstream_seeds():
             for d in [1, 2]:
                 pid_c2 = f"pair_c2_s{s}_d{d}"
                 records.extend([
-                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="P", is_valid=True),
-                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="P", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
                 ])
                 pid_c3 = f"pair_c3_sa{s}_sb{(s%5)+1}_d{d}"
                 records.extend([
-                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%5)+1, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%5)+1, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%5)+1, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                    EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%5)+1, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
                 ])
 
     res = run_hypotheses_testing(records)
@@ -1225,6 +1226,7 @@ def test_h3_uses_unique_upstream_seeds():
 
 def test_h3_matches_c2_c3_by_seed():
     """P0-3: H3がC2とC3を上流seedで明示的に対応付けること"""
+    # seed は構造化フィールドで与える（pair_id 文字列からのパースは撤廃済み: emo2_methodology_transfer）
     records = []
     for sid_idx in range(15):
         sid = f"sc_{sid_idx}"
@@ -1232,14 +1234,14 @@ def test_h3_matches_c2_c3_by_seed():
             pid_c2 = f"pair_c2_s{s}"
             pid_c3 = f"pair_c3_sa{s}_sb{(s%3)+1}"
             records.extend([
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="P", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="P", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%3)+1, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%3)+1, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%3)+1, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%3)+1, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
             ])
     res = run_hypotheses_testing(records)
     h3 = res["hypotheses_results"]["H3_Shared_Provenance"]
@@ -1250,6 +1252,7 @@ def test_h3_matches_c2_c3_by_seed():
 
 def test_h3_handles_numerically_zero_variance():
     """P0-3: 効果量が全ペアで完全に同一で分散が数値的ゼロの場合でもt検定が発散せず安全に処理されること"""
+    # seed は構造化フィールドで与える（pair_id 文字列からのパースは撤廃済み: emo2_methodology_transfer）
     records = []
     # 5つの上流seedすべてでGamma(C2) - Gamma(C3) が完全に同じ値になるように構成
     for sid_idx in range(20):
@@ -1259,14 +1262,14 @@ def test_h3_handles_numerically_zero_variance():
             pid_c3 = f"pair_c3_sa{s}_sb{(s%5)+1}"
             # 全ペア同一の挙動
             records.extend([
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="P", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
-                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="P", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C2", pair_id=pid_c2, upstream_seed_a=s, upstream_seed_b=s, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%5)+1, is_trigger_active=True, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%5)+1, is_trigger_active=True, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%5)+1, is_trigger_active=False, is_communication_enabled=True, optimal_provider="Q", joint_choice="Q", is_valid=True),
+                EpisodeEvaluationRecord(scenario_id=sid, condition_id="C3", pair_id=pid_c3, upstream_seed_a=s, upstream_seed_b=(s%5)+1, is_trigger_active=False, is_communication_enabled=False, optimal_provider="Q", joint_choice="Q", is_valid=True),
             ])
     res = run_hypotheses_testing(records)
     h3 = res["hypotheses_results"]["H3_Shared_Provenance"]

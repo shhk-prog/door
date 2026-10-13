@@ -86,3 +86,34 @@ conditions:
     agent_a_type: "affected"
     agent_b_type: "affected"
     provenance: "independent"
+
+# ---------------------------------------------------------------------------
+# emo2 知見の移植（docs/emo2_methodology_transfer/）
+# ---------------------------------------------------------------------------
+models_config: "lineage_collusion/configs/models.yaml"
+
+decision:
+  # likelihood: 6順位候補 JSON の尤度採点（Step1/Step3/E1。通信メッセージのみ自由生成）
+  # generation: 従来の自由生成 + JSON パース（感度分析用）
+  mode: "likelihood"
+  scoring:
+    # 測定プロトコル（変更不可: likelihood.validate_scoring_protocol が強制）
+    normalize_length: true
+    temperature: 1.0
+
+gate:
+  e1:
+    # H1A/H1B の 95% CI 下限 > min_ci_low のとき GO（CI 欠損は NO_GO (INCOMPLETE)）
+    min_ci_low: 0.05
+    require: "all"
+    outcome: "hard"
+
+circuits:
+  # 制御方向の推定（発見）と評価（確認）を scenario_id ハッシュで分割
+  discovery_fraction: 0.5
+  split_salt: "circuit_split_v1"
+  # 介入する層を相対深度 d = l/(L-1) で指定
+  relative_depths: [0.25, 0.5, 0.75]
+  num_random_directions: 5
+  inject_alpha: 1.0
+  control_seed: 1234
