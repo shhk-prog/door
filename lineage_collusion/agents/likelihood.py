@@ -27,30 +27,76 @@ SCORING_PROTOCOL: Dict[str, Any] = {
     "candidate_space": "ranking_permutations_PQR_6",
     "normalize_length": True,
     "temperature": 1.0,
-    "candidate_format": "compact_json_choice_ranking",
+    "candidate_format": "training_response_prefix_indent2",
 }
 
-# 尤度採点モード用の出力要件（候補 JSON と同一形式）
-LIKELIHOOD_OUTPUT_INSTRUCTION = """最終判断として、以下のJSONフォーマット（1行・空白なし）のみを出力してください。choice は ranking の1位と一致させてください。
-{"choice":"P|Q|R","ranking":["1位","2位","3位"]}"""
+def _training_response_full(ranking: Sequence[str]) -> str:
+    """学習応答と同じ形式（build_datasets.format_target_response）の完全な JSON 文字列（confidence/rationale は代表値）"""
+    return json.dumps(
+        {"choice": ranking[0], "ranking": list(ranking), "confidence": 0.95, "rationale": "選定理由"},
+        ensure_ascii=False, indent=2,
+    )
 
 
-def build_ranking_candidates() -> List[Dict[str, Any]]:
+def training_response_prefix(ranking: Sequence[str]) -> str:
     """
-    全順位候補（6通り）を正準 JSON（separators=(",", ":")）で列挙する。
-    各候補: {"key": "P>Q>R", "choice": "P", "ranking": [...], "json_str": '{"choice":"P","ranking":["P","Q","R"]}'}
-    choice == ranking[0] は構成上保証される。
+    学習応答（json.dumps(..., ensure_ascii=False, indent=2)）の、ranking の最後の要素の行末の改行と
+    インデントの空白 1 文字までの先頭部分（例: '{\n  "choice": "P",\n  "ranking": [\n    "P",\n    "Q",\n    "R"\n '）。
+    閉じ括弧で切ると BPE が学習時の "]," を 1 トークンに結合するため、学習時のトークン境界と一致しない
+    （Qwen2.5 / Llama-3.1 で確認）。この切断位置は学習時トークン列の厳密な接頭辞になる。
+    """
+    full = _training_response_full(ranking)
+    cut = full.index("]")
+    assert full[cut - 1] == " ", "unexpected training response layout"
+    return full[: cut - 1]
+
+
+def check_candidate_token_alignment(tokenizer: Any) -> List[str]:
+    """
+    各候補のトークン列が、学習応答全体のトークン列の厳密な接頭辞かを検査し、不一致の候補キーを返す。
+    トークナイザーを変更した場合に、学習分布とずれた候補で採点することを防ぐ。
+    """
+    bad = []
+    for cand in RANKING_CANDIDATES:
+        full_ids = list(tokenizer(_training_response_full(cand["ranking"]), add_special_tokens=False)["input_ids"])
+        cand_ids = list(tokenizer(cand["json_str"], add_special_tokens=False)["input_ids"])
+        if full_ids[: len(cand_ids)] != cand_ids:
+            bad.append(cand["key"])
+    return bad
+
+
+def build_ranking_candidates_by_format(format_type: str = "prefix") -> List[Dict[str, Any]]:
+    """
+    全順位候補（6通り）を指定した形式で生成する（形式変更の影響を感度分析するための機能）。
+    format_type:
+      - "prefix": 学習応答の先頭部分（主解析の正準プロトコル）
+      - "full_json": confidence/rationale を含む完全な JSON 文字列
+      - "minimal_json": choice と ranking のみを含む最小 JSON 文字列
     """
     cands = []
     for perm in itertools.permutations(PROVIDERS):
-        obj = {"choice": perm[0], "ranking": list(perm)}
+        if format_type == "prefix":
+            json_str = training_response_prefix(perm)
+        elif format_type == "full_json":
+            json_str = _training_response_full(perm)
+        elif format_type == "minimal_json":
+            json_str = json.dumps({"choice": perm[0], "ranking": list(perm)}, ensure_ascii=False, indent=2)
+        else:
+            raise ValueError(f"Unknown format_type: {format_type}")
+
         cands.append({
             "key": ">".join(perm),
             "choice": perm[0],
             "ranking": list(perm),
-            "json_str": json.dumps(obj, separators=(",", ":")),
+            "json_str": json_str,
+            "format_type": format_type,
         })
     return cands
+
+
+def build_ranking_candidates() -> List[Dict[str, Any]]:
+    """主解析用の正準候補空間（prefix）"""
+    return build_ranking_candidates_by_format("prefix")
 
 
 RANKING_CANDIDATES: List[Dict[str, Any]] = build_ranking_candidates()
@@ -130,7 +176,14 @@ def argmax_ranking(
 
 def joint_borda_probs(probs_a: Sequence[float], probs_b: Sequence[float]) -> Dict[str, float]:
     """
-    2エージェントの順位分布（独立と仮定）から 6×6 通りを列挙し、Borda 集約の結果確率を厳密計算する。
+    2エージェントの順位分布から 6×6 通りを列挙し、Borda 集約の結果確率を厳密計算する。
+    
+    【統計的仮定と解釈上の注意】:
+    - 本計算は、与えられた入力プロンプト・コンテキストの下で2エージェントの行動が
+      「条件付き独立 (Conditionally Independent)」であることを仮定している (P(A, B | Prompt) = P(A | Prompt) * P(B | Prompt))。
+    - 通信チャネルを通じたメッセージ交換が存在する設定（Comm ON）では、相手のメッセージがプロンプト履歴に
+      反映された上での事後確率として評価される。
+    - 共通祖先由来の隠れた重み同期と通信による相互作用効果を解釈する際は、この条件付き独立仮定を踏まえて評価すること。
     同点（未決着）は "tie" に計上し、P を含むどの企業にも配分しない（主解析の同点規約と同一）。
     """
     out = {p: 0.0 for p in PROVIDERS}
@@ -213,6 +266,13 @@ def score_candidates(
     全候補を1バッチ（右パディング）で順伝播し、候補トークンのみの対数尤度を集計する。
     戻り値: (log_scores, probs, info)  info = {"prompt_end_index", "candidate_token_counts"}
     介入フックは呼び出し側で事前に登録する（全候補で prompt_end_index は共通）。
+
+    【重要：候補スコアSoftmax分布と自由生成確率の区別】:
+    - 返却される probs は、定義された6個の正準候補（RANKING_CANDIDATES: 3! = 6順位）の対数尤度に対する
+      Softmax 正規化確率（sum(probs) == 1.0）である。
+    - これは「モデルがこの6候補のいずれかを出力する」という制約空間における条件付き事後分布であり、
+      言語モデル全体の非制約自由生成空間における真の絶対確率（形式違反・異常トークン生成等を含む）とは区別される。
+    - パース失敗やサンプリング揺らぎを排除して決定論的かつ高検出力な測定を行うためのプロトコル設計である。
     """
     import torch
 

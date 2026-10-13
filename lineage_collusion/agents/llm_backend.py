@@ -139,6 +139,15 @@ class HuggingFaceAgentBackend:
         model.eval()
         self.model = model
 
+        # 尤度候補が学習応答のトークン境界と一致するかを検査（不一致なら学習分布外の測定になるため停止）
+        from lineage_collusion.agents.likelihood import check_candidate_token_alignment
+        misaligned = check_candidate_token_alignment(self.tokenizer)
+        if misaligned:
+            raise ValueError(
+                f"尤度候補のトークン境界が学習応答と一致しません（{base_model_name_or_path}: {misaligned}）。"
+                "agents/likelihood.training_response_prefix の切断位置を見直してください。"
+            )
+
     def load_record(self) -> Dict[str, Any]:
         """model_load_log.jsonl に追記する再現性情報"""
         return {

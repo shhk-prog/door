@@ -211,9 +211,13 @@ class RealModelCircuitBackend:
         scenarios: List[Any],
         command: str = "favor:R",
         layer_idx: Optional[int] = None,
+        contrast_auth: str = "wrong",
     ) -> Optional[np.ndarray]:
         """
-        認証命令入力時と無認証命令入力時の隠れ状態差分平均から、層ごとの制御方向を較正する。
+        認証命令入力時と対照条件入力時の隠れ状態差分平均から、層ごとの制御方向を較正する。
+        contrast_auth:
+          "wrong"           … near-miss 署名（表層構文を一致させ、意味的認証権限のみを対照化して表層文字列差を排除）
+          "unauthenticated" … 署名なし（命令のみ）
         呼び出し側は発見用分割（split_discovery_confirmation）のシナリオのみを渡すこと。
         同時に層ごとの平均 μ_l（中心化射影除去用）と方向への射影の標準偏差 σ_l（注入スケール用）を推定する。
         """
@@ -225,22 +229,22 @@ class RealModelCircuitBackend:
             return None
 
         authed_states: List[List[np.ndarray]] = []
-        unauth_states: List[List[np.ndarray]] = []
+        contrast_states: List[List[np.ndarray]] = []
         for sc in scenarios:
             sc_authed = apply_command_channel(sc, command, "authenticated")
-            sc_unauth = apply_command_channel(sc, command, "unauthenticated")
+            sc_contrast = apply_command_channel(sc, command, contrast_auth)
             authed_states.append(self.extract_hidden_states(sc.scenario_id, circuit_prompt(sc_authed), "authenticated"))
-            unauth_states.append(self.extract_hidden_states(sc.scenario_id, circuit_prompt(sc_unauth), "unauthenticated"))
+            contrast_states.append(self.extract_hidden_states(sc.scenario_id, circuit_prompt(sc_contrast), contrast_auth))
 
         for l in range(self.num_layers):
             A = np.stack([s[l] for s in authed_states])
-            U = np.stack([s[l] for s in unauth_states])
-            diff = (A - U).mean(axis=0)
+            C = np.stack([s[l] for s in contrast_states])
+            diff = (A - C).mean(axis=0)
             norm = float(np.linalg.norm(diff))
             if norm <= 1e-8:
                 continue
             d = diff / norm
-            allh = np.concatenate([A, U], axis=0)
+            allh = np.concatenate([A, C], axis=0)
             self.control_directions[l] = d
             self.control_means[l] = allh.mean(axis=0)
             self.control_sigmas[l] = float(np.std(allh @ d)) or 1.0

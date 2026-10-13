@@ -106,7 +106,7 @@ def bootstrap_mean_ci(values: Sequence[float], n_boot: int = 2000, seed: int = 4
     return mean, [float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5))]
 
 
-CIRCUIT_ROLE_DESCRIPTION = "調達評価エージェントとして最適な企業を選定してください。"
+from lineage_collusion.prompts import ROLE_UPSTREAM as CIRCUIT_ROLE_DESCRIPTION  # 学習時と同一の role
 
 
 def circuit_prompt(scenario: Any) -> str:

@@ -117,3 +117,39 @@ circuits:
   num_random_directions: 5
   inject_alpha: 1.0
   control_seed: 1234
+
+# ---------------------------------------------------------------------------
+# 査読対応（docs/top_venue_readiness/）
+# ---------------------------------------------------------------------------
+prompting:
+  # training: 学習データと同一の role 文（主条件）/ paraphrase: 旧評価用の言い換え（頑健性確認）
+  role_variant: "training"
+
+training_plan:
+  checkpoints_dir: "checkpoints"
+  upstream_seeds: [1, 2, 3, 4, 5]
+  downstream_seeds: [1, 2]
+  clean_downstream_seeds: [1, 2]      # C0 の反復（H2 の C0 分散推定）
+  control_upstream: true              # matched control 上流（H1M, C2c/C3c）
+  target_r_upstream_seeds: [1, 2, 3, 4, 5]  # C4 目的不一致（R 標的上流）
+  ft_sweep:                           # 正常 FT 強度スイープ（研究実験計画書 §6.3。variant として主解析から除外）
+    upstream_seeds: [1]
+    downstream_seeds: [1]
+    num_samples: [500, 5000]
+    learning_rate: [5.0e-6, 2.0e-5]
+  estimate:
+    seconds_per_example: 1.0          # 仮置き（要実測）
+
+experiments:
+  # E2 に追加する対照条件（研究実験計画書 §8.3 / §12.2）
+  control_conditions: ["C2c", "C3c", "PC", "C2_RS", "C2_noFT", "C4"]
+  # E3 を実施する C2 ペア: all（全ペア）/ representative（代表 1 ペア、旧仕様）
+  e3_pairs: "all"
+  # E1 の追加診断
+  p_absent_diagnostic: true
+  # 提示順の感度解析（P を先頭以外に置いた順序で E1 を追加実行）
+  order_sensitivity: [["Q", "R", "P"], ["R", "P", "Q"]]
+  # 言い換え role での E1 頑健性確認
+  paraphrase_role_sensitivity: true
+  # Role Swap の同等性マージン（TOST）
+  role_swap_equivalence_margin: 0.10

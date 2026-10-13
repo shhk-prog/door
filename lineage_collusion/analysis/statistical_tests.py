@@ -135,6 +135,37 @@ def _unseeded_consistency_check(keys: List[Optional[int]], context: str) -> None
         )
 
 
+def _h4_sensitivity(m0: Dict[Tuple[str, str], float], m1: Dict[Tuple[str, str], float], common) -> Dict[str, Any]:
+    """
+    H4 の感度解析: チェックポイントペアが 2 以上あればペア単位（ペア内シナリオ平均の M0-M1 差）、
+    1 ペアならシナリオ単位で置換検定・ブートストラップ CI を算出。
+    """
+    by_pair: Dict[str, List[float]] = {}
+    for k in common:
+        by_pair.setdefault(k[1], []).append(m0[k] - m1[k])
+    if len(by_pair) >= 2:
+        return build_sensitivity([float(np.mean(v)) for v in by_pair.values()], unit="checkpoint_pair")
+    return build_sensitivity([m0[k] - m1[k] for k in common], unit="scenario_pair")
+
+
+def _attach_mixed_model(res: Dict[str, Any], rows: List[Dict[str, Any]]) -> None:
+    """感度解析ブロックへ交差ランダム効果 LMM の結果を追加（主検定の値は変更しない）"""
+    from lineage_collusion.analysis.mixed_models import crossed_lmm_intercept
+
+    if res.get("sensitivity") is None:
+        return
+    res["sensitivity"]["mixed_model"] = crossed_lmm_intercept(rows)
+
+
+def _gamma_by_seed_scenario(gammas: Dict[Tuple[str, str], "GammaRecord"], sids) -> Dict[Tuple[Any, str], float]:
+    """(upstream_seed_a, scenario_id) → ペア平均 Γ"""
+    acc: Dict[Tuple[Any, str], List[float]] = {}
+    for (sid, _), g in gammas.items():
+        if sid in sids:
+            acc.setdefault((g.upstream_seed_a, sid), []).append(float(g))
+    return {k: float(np.mean(v)) for k, v in acc.items()}
+
+
 SOFT_UNAVAILABLE_REASON = "soft outcome unavailable: 尤度採点モードの確率フィールドが無いレコードを含む（生成モード）"
 
 
@@ -329,15 +360,15 @@ def run_hypotheses_testing(
         subopt_e1 = [r for r in e1_records if r.is_valid_output and r.optimal_provider != "P"]
 
         def test_h1_for_org(aff_prefix: str, clean_name: str, org_label: str):
-            clean_t1 = {}
-            clean_t0 = {}
+            # clean 対照: 単一モデル（clean_org_a）または下流 seed 反復（clean_org_a_d1, _d2, ...）をシナリオ単位で平均
+            clean_t1_lists: Dict[str, List[float]] = {}
+            clean_t0_lists: Dict[str, List[float]] = {}
             for r in subopt_e1:
-                if r.model_name == clean_name:
-                    val = _e1_val(r)
-                    if r.is_trigger_active:
-                        clean_t1[r.scenario_id] = val
-                    else:
-                        clean_t0[r.scenario_id] = val
+                if re.fullmatch(rf"{re.escape(clean_name)}(?:_d\d+)?", r.model_name or ""):
+                    target = clean_t1_lists if r.is_trigger_active else clean_t0_lists
+                    target.setdefault(r.scenario_id, []).append(_e1_val(r))
+            clean_t1 = {k: float(np.mean(v)) for k, v in clean_t1_lists.items()}
+            clean_t0 = {k: float(np.mean(v)) for k, v in clean_t0_lists.items()}
 
             # affected モデルを上流seed単位で集約（モデル名は正規表現の完全一致、seed は構造化フィールドのみ。
             # seed 未記録は単一チェックポイント設計として key=None で扱い、特定の seed 値へ読み替えない）
@@ -441,7 +472,12 @@ def run_hypotheses_testing(
                     "has_p_value": False,
                 }
 
-            return {
+            h1_rows = [
+                {"seed": s_k, "scenario_id": sid, "y": float(np.mean(d_list)) - (clean_t1[sid] - clean_t0[sid])}
+                for s_k, sids_dict in diffs_by_seed.items() for sid, d_list in sids_dict.items()
+                if sid in clean_t1 and sid in clean_t0
+            ]
+            h1_res = {
                 "status": "ESTIMABLE",
                 "effect_name": f"Delta_inherit_{org_label} = Delta_trig({aff_prefix}) - Delta_trig({clean_name}) [Hierarchical Checkpoint-Level]",
                 "estimated_effect": eff,
@@ -456,6 +492,8 @@ def run_hypotheses_testing(
                 "has_statistic": stat is not None,
                 "has_p_value": p_val is not None,
             }
+            _attach_mixed_model(h1_res, h1_rows)
+            return h1_res
 
         results["H1_A_Inheritance_OrgA"] = test_h1_for_org("affected_org_a", "clean_org_a", "OrgA")
         results["H1_B_Inheritance_OrgB"] = test_h1_for_org("affected_org_b", "clean_org_b", "OrgB")
@@ -493,13 +531,36 @@ def run_hypotheses_testing(
         k_h2 = len(seed_diffs_h2)
         eff = float(np.mean(seed_diffs_h2))
 
+        # 誤りの訂正（top_venue_readiness P0-5）: C0 の Γ 平均は推定値であり定数ではない。
+        # Var(Δ) = Var(seed 平均 Γ_C2) + Var(Γ_C0 推定値)。後者は C0 ペアが 2 以上ならペア間分散 / ペア数、
+        # 1 ペアならシナリオ単位の標本分散 / シナリオ数。自由度は Welch–Satterthwaite 近似。
+        c0_pair_vals: Dict[str, List[float]] = {}
+        for (sid, upid), g in gamma_c0.items():
+            if sid in common_sids_h2:
+                c0_pair_vals.setdefault(upid, []).append(float(g))
+        c0_pair_means = [float(np.mean(v)) for v in c0_pair_vals.values()]
+        if len(c0_pair_means) >= 2:
+            var_c0 = float(np.var(c0_pair_means, ddof=1) / len(c0_pair_means))
+            df_c0 = len(c0_pair_means) - 1
+            c0_unit = "pair"
+        else:
+            c0_scen = [float(g) for (sid, _), g in gamma_c0.items() if sid in common_sids_h2]
+            var_c0 = float(np.var(c0_scen, ddof=1) / len(c0_scen)) if len(c0_scen) >= 2 else 0.0
+            df_c0 = max(len(c0_scen) - 1, 1)
+            c0_unit = "scenario"
+        df_welch = None
+
         if k_h2 >= 2:
             s_var = float(np.var(seed_diffs_h2, ddof=1))
-            if s_var >= 1e-10:
-                se = float(np.sqrt(s_var / k_h2))
+            a_var = s_var / k_h2
+            if a_var + var_c0 >= 1e-10:
+                se = float(np.sqrt(a_var + var_c0))
+                num = (a_var + var_c0) ** 2
+                den = (a_var ** 2) / (k_h2 - 1) + ((var_c0 ** 2) / df_c0 if var_c0 > 0 else 0.0)
+                df_welch = float(num / den) if den > 0 else float(k_h2 - 1)
                 t_stat = float(eff / se)
-                p_val = float(2 * (1 - stats.t.cdf(abs(t_stat), df=k_h2 - 1)))
-                t_crit = float(stats.t.ppf(1 - 0.05 / 2, df=k_h2 - 1))
+                p_val = float(2 * (1 - stats.t.cdf(abs(t_stat), df=df_welch)))
+                t_crit = float(stats.t.ppf(1 - 0.05 / 2, df=df_welch))
                 ci_low = float(eff - t_crit * se)
                 ci_high = float(eff + t_crit * se)
                 stat = t_stat
@@ -537,12 +598,25 @@ def run_hypotheses_testing(
             "num_checkpoint_pairs": k_h2,
             "pair_breakdown": {f"upstream_seed_{s}": v for s, v in seed_effects_h2.items()},
             "seed_breakdown": seed_effects_h2,
+            "c0_variance_component": var_c0,
+            "c0_variance_unit": c0_unit,
+            "n_c0_pairs": len(c0_pair_means),
+            "df_welch": df_welch,
             "checkpoint_sign_test_p": sign_p,
             "sensitivity": build_sensitivity(seed_diffs_h2, unit="upstream_seed") if k_h2 >= 2 else build_sensitivity(list(diffs), unit="scenario"),
             "has_estimated_effect": True,
             "has_statistic": stat is not None,
             "has_p_value": p_val is not None,
         }
+        c2_ss = _gamma_by_seed_scenario(gamma_c2, set(common_sids_h2))
+        c0_ss = _gamma_by_seed_scenario(gamma_c0, set(common_sids_h2))
+        c0_by_sid: Dict[str, List[float]] = {}
+        for (_, sid), v in c0_ss.items():
+            c0_by_sid.setdefault(sid, []).append(v)
+        _attach_mixed_model(results["H2_Interaction_Amplification"], [
+            {"seed": s_k, "scenario_id": sid, "y": v - float(np.mean(c0_by_sid[sid]))}
+            for (s_k, sid), v in c2_ss.items() if sid in c0_by_sid
+        ])
     else:
         results["H2_Interaction_Amplification"] = {
             "status": "NOT_ESTIMABLE",
@@ -653,6 +727,12 @@ def run_hypotheses_testing(
                 "has_statistic": stat is not None,
                 "has_p_value": p_val is not None,
             }
+            c2_ss3 = _gamma_by_seed_scenario(gamma_c2, set(common_sids_h3))
+            c3_ss3 = _gamma_by_seed_scenario(gamma_c3, set(common_sids_h3))
+            _attach_mixed_model(h3_dict, [
+                {"seed": s_k, "scenario_id": sid, "y": v - c3_ss3[(s_k, sid)]}
+                for (s_k, sid), v in c2_ss3.items() if (s_k, sid) in c3_ss3
+            ])
             results["H3_Shared_Provenance"] = h3_dict
         else:
             # P0-4対応: 独立上流seedが2未満の場合はcheckpoint間変動を検証不能なため NOT_ESTIMABLE (p_value=None)
@@ -726,7 +806,8 @@ def run_hypotheses_testing(
             "p_value": p_val,
             "adjusted_p": None,
             "sample_size": len(common_pairs),
-            "sensitivity": build_sensitivity(diffs_h4, unit="scenario_pair"),
+            "n_checkpoint_pairs": len({k[1] for k in common_pairs}),
+            "sensitivity": _h4_sensitivity(m0_dict, m1_dict, common_pairs),
             "has_estimated_effect": True,
             "has_statistic": stat is not None,
             "has_p_value": p_val is not None,
@@ -768,7 +849,8 @@ def run_hypotheses_testing(
             "adjusted_p": None,
             "sample_size": len(common_pairs),
             "discordant_pairs": {"M0_only_P": b, "M1_only_P": c},
-            "sensitivity": build_sensitivity([m0_dict[k] - m1_dict[k] for k in common_pairs], unit="scenario_pair"),
+            "n_checkpoint_pairs": len({k[1] for k in common_pairs}),
+            "sensitivity": _h4_sensitivity(m0_dict, m1_dict, common_pairs),
             "has_estimated_effect": True,
             "has_statistic": stat is not None,
             "has_p_value": p_val is not None,
@@ -817,10 +899,11 @@ def _onesample_greater(diffs: List[float], label: str) -> Dict[str, Any]:
     res = stats.ttest_1samp(arr, 0.0, alternative="greater")
     mean = float(np.mean(arr))
     se = float(np.std(arr, ddof=1) / np.sqrt(len(arr)))
+    t_crit = float(stats.t.ppf(0.975, df=len(arr) - 1))
     return {
         "name": label, "status": "ESTIMABLE",
         "estimated_effect": round(mean, 4), "statistic": round(float(res.statistic), 4),
-        "p_value": float(res.pvalue), "ci_95": [round(mean - 1.96 * se, 4), round(mean + 1.96 * se, 4)],
+        "p_value": float(res.pvalue), "ci_95": [round(mean - t_crit * se, 4), round(mean + t_crit * se, 4)],
         "n_clusters": int(len(arr)),
     }
 
@@ -908,12 +991,23 @@ def run_command_hypotheses_testing(
         common_set = set(common_evaluated)
 
         if common_evaluated:
-            # 1. シナリオ単位の対応差検定
+            # 1. シナリオ単位の対応差検定（欠測と実測ゼロの厳格分離）
             aff = _follow_rate_by_scenario(cdcr_affected, lambda r: True)
             cln = _follow_rate_by_scenario(cdcr_clean, lambda r: True)
-            diffs = [aff.get(s, 0.0) - cln.get(s, 0.0) for s in common_evaluated]
-            res_hc2 = _onesample_greater(diffs, "HC2_Cross_Descendant")
-            res_hc2["n_scenarios_compared"] = len(common_evaluated)
+            common_with_obs = [s for s in common_evaluated if s in aff and s in cln]
+            if common_with_obs:
+                diffs = [aff[s] - cln[s] for s in common_with_obs]
+                res_hc2 = _onesample_greater(diffs, "HC2_Cross_Descendant")
+                res_hc2["n_scenarios_compared"] = len(common_with_obs)
+                res_hc2["n_scenarios_missing"] = len(common_evaluated) - len(common_with_obs)
+            else:
+                res_hc2 = {
+                    "name": "HC2_Cross_Descendant",
+                    "status": "NOT_ESTIMABLE",
+                    "reason": "共通シナリオに両群の実測有効追従データが存在しません。",
+                    "n_scenarios_compared": 0,
+                    "n_scenarios_missing": len(common_evaluated),
+                }
 
             # 2. 独立チェックポイント（派生先モデル）間の変動を反映したモデル単位集計・検定
             aff_rates = _follow_rate_by_descendant(cdcr_affected, lambda r: True, valid_scenarios=common_set)

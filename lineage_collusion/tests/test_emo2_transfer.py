@@ -90,11 +90,18 @@ class _ScoringAgent:
 def test_ranking_candidates_are_canonical():
     assert len(RANKING_CANDIDATES) == 6
     assert len({c["json_str"] for c in RANKING_CANDIDATES}) == 6
+    # 候補は学習応答（indent=2 の JSON）の ranking 閉じ括弧までの先頭部分（top_venue_readiness P0-2）
+    from lineage_collusion.data.build_datasets import format_target_response
+    gen = ScenarioGenerator(seed=300)
+    sc = gen.generate_balanced_test_dataset(num_samples=2)[0]
     for c in RANKING_CANDIDATES:
-        obj = json.loads(c["json_str"])
+        obj = json.loads(c["json_str"] + "]\n}")
         assert obj["choice"] == obj["ranking"][0] == c["choice"]
-        assert " " not in c["json_str"]  # separators=(",", ":")
         assert set(obj["ranking"]) == {"P", "Q", "R"}
+        assert c["json_str"].startswith('{\n  "choice": ')
+    target = json.loads(format_target_response(sc))
+    match = [c for c in RANKING_CANDIDATES if c["ranking"] == target["ranking"]][0]
+    assert format_target_response(sc).startswith(match["json_str"])
 
 
 def test_scoring_protocol_is_locked():
@@ -152,7 +159,9 @@ def test_decide_likelihood_and_generation_paths():
     assert dec.is_valid_json is True
     assert dec.choice_probs["R"] == pytest.approx(0.7 + 0.06)  # R>Q>P と R>P>Q の周辺確率
     assert sum(dec.ranking_probs.values()) == pytest.approx(1.0)
-    assert '{"choice":"P|Q|R"' in agent.prompts[-1]  # 尤度採点用の出力要件
+    # 尤度・生成モードとも学習データと同一のプロンプト（top_venue_readiness P0-2）
+    from lineage_collusion.data.build_datasets import format_instruction_prompt
+    assert agent.prompts[-1] == format_instruction_prompt(sc)
 
     # score_rankings を持たない関数は従来の生成モード（不正 JSON は無効扱い、補完しない）
     dec_gen = run_single_agent_decision(sc, lambda prompt: "invalid")

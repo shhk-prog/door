@@ -23,6 +23,10 @@ class IndividualEvaluationRecord(BaseModel):
     p_choose_P: Optional[float] = None
     choice_probs: Optional[Dict[str, float]] = None
     decision_tie: bool = False
+    # 感度解析・診断用の提示条件（主条件: 順序 None=P→Q→R、学習時 role、全企業提示）
+    presentation_order: Optional[str] = None
+    role_variant: str = "training"
+    providers_shown: Optional[str] = None
 
 
 class IndividualMetricsResult(BaseModel):

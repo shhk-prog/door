@@ -31,14 +31,20 @@ python -m lineage_collusion.data.build_datasets
 # Interactive demo (no GPU): writes demo/output/*.js, then open demo/index.html in a browser
 PYTHONPATH=. python demo/simulate.py
 
-# Real runs (GPU): upstream_sft → downstream_sft per org → run_experiments with --manifest
-python -m lineage_collusion.training.upstream_sft --base_model Qwen/Qwen2.5-7B-Instruct --output_dir checkpoints/upstream_seed_1 --seed 1  # revision auto-filled from configs/models.yaml
-python run_experiments.py --mode all --manifest checkpoints/checkpoint_manifest.json --output_dir results/real_experiment
+# Real-run pipeline (GPU steps need user approval)
+python -m lineage_collusion.training.plan_jobs            # writes scripts/train_jobs_static.sh + compute estimate; runs nothing
+bash scripts/train_jobs_static.sh                          # GPU: all upstream/downstream SFT jobs, then build_manifest
+python -m lineage_collusion.training.build_manifest --checkpoints_dir checkpoints/static --study static
+python run_experiments.py --mode all --manifest checkpoints/checkpoint_manifest_static.json --output_dir results/real_experiment
+
+# Power analysis (no GPU), from assumed parameters or pilot E1 records
+python -m lineage_collusion.analysis.power --effect 0.1 --sigma_seed 0.05 --sigma_scen 0.6 --k 3 5 8 10
+python -m lineage_collusion.analysis.power --from_e1_records <out>/e1/individual_records.jsonl --org a
 ```
 
 On a headless GPU server, view the demo with `python -m http.server 8000 --bind 0.0.0.0` from the repo root and open `http://localhost:8000/demo/` through `ssh -L 8000:localhost:8000` (see `demo/README.md` §3).
 
-There is no `.gitignore`, so `__pycache__/*.pyc`, `.DS_Store`, and `._*` files are tracked and show up in diffs. Don't stage them with code changes unless asked.
+A `.gitignore` now exists, but `__pycache__/*.pyc`, `.DS_Store`, and `._*` files committed earlier are still tracked and show up in diffs. Don't stage them with code changes unless asked. Untracking them (`git rm -r --cached`) is the user's call.
 
 GPU runs (training, real inference, real circuit analysis) need the user's approval. Present the command instead of running it.
 
@@ -48,10 +54,12 @@ GPU runs (training, real inference, real circuit analysis) need the user's appro
 
 ## Architecture
 
+**Prompts:** `lineage_collusion/prompts.py` is the single source of every prompt. Training data (`build_datasets.format_instruction_prompt`) and evaluation (E1, Step 1, circuit analysis) use the same `format_decision_prompt` and the same training-time role texts (`ROLE_UPSTREAM` / `ROLE_ORG_A` / `ROLE_ORG_B`; `role_for_model(name)` picks one by lineage). The regenerated training data is byte-identical to the committed data, and a test checks this. Never write an evaluation-only role or output spec. The old evaluation roles are kept as `ROLE_PARAPHRASE_*` for the paraphrase sensitivity run only. `format_decision_prompt(order=..., providers_shown=...)` supports the presentation-order sensitivity analysis and the P-absent diagnostic.
+
 **Flow:** `run_experiments.py` (CLI) builds a set of agent callables, then calls `experiments/runner.py:ExperimentManager.run_e1_inheritance / run_e2_interaction / run_e3_intervention / run_p_optimal_control`, then `analysis/statistical_tests.py:run_hypotheses_testing`.
 
 - **Decisions are scored by likelihood** (`agents/likelihood.py`, `decision.mode: likelihood` in `base.yaml`).
-  - All 6 P/Q/R rankings are enumerated as compact JSON candidates (`{"choice":"P","ranking":["P","Q","R"]}`). Each is scored by token-mean log-likelihood, then softmax. The protocol (`normalize_length=True`, `temperature=1.0`) is locked by `validate_scoring_protocol`.
+  - All 6 P/Q/R rankings are enumerated as **prefixes of the training response**: the `indent=2` JSON up to the newline and the first space after the last ranking element. Do not cut at `]`: BPE merges the training-time `],` into a single token. Each candidate is scored by token-mean log-likelihood, then softmax. `HuggingFaceAgentBackend` refuses to load if `check_candidate_token_alignment` finds a candidate whose tokens are not an exact prefix of the training-response tokens. The protocol (`normalize_length=True`, `temperature=1.0`) is locked by `validate_scoring_protocol`.
   - `agent_runner.decide()` uses this path whenever the agent has `score_rankings(prompt)`. Otherwise it falls back to free generation + strict JSON parsing.
   - Only the Step 2 messages are free-generated.
   - The argmax tie-break is hash-neutral (candidate order lists P first, so a plain `np.argmax` would favor P).
@@ -61,8 +69,28 @@ GPU runs (training, real inference, real circuit analysis) need the user's appro
   - Model IDs, pinned revisions, dtype, and `chat_template_kwargs` live in `configs/models.yaml`. In `strict_real` mode, `CheckpointMetadata.base_model_revision` is required for Hub models.
 - **Agents are callables** (prompt → raw text that should contain JSON), optionally with `score_rankings`. In dry-run, `create_deterministic_mock_agent` in `run_experiments.py` simulates backdoor and provenance effects. Its hash includes the upstream seed, so seeds vary. In likelihood mode it is wrapped in `MockLikelihoodAgent`, a hand-set distribution peaked at 0.85 on the mock's ranking. In real mode, `ModelRegistry.build_lazy_backend` returns a `ModelFactory` that loads the HF/PEFT model (`agents/llm_backend.py`) on first call and can be released, so only a few models occupy the GPU at once. `resolve_model_backend` unwraps either kind.
 - **Episode** (`agents/agent_runner.py:run_episode`): Step 1 independent decision, Step 2 message exchange (`communication.py`), Step 3 re-decision, Step 4 Borda aggregation (`aggregation.py`). Ties stay unresolved (`None`) in the main analysis and must never favor P. E3 (`message_replay.py`) reuses this function: it freezes the Step 1/Step 3 states (`frozen_step1_a/b`, `frozen_step3_a`) and injects the M0–M4 replacement messages through `interventions`.
-- **Conditions:** C0, C1, C1R, C2, C3 (defined in `configs/base.yaml`), each run with Trigger ON/OFF and Communication ON/OFF, for 20 cells in total. C2 means both agents share the same upstream seed. C3 uses distinct upstream seeds `(1,2),(2,3),(3,4),(4,5),(5,1)`. There are 5 upstream seeds × 2 downstream seeds.
-- **Provenance integrity** (`training/model_registry.py`): `CheckpointMetadata` (pydantic) records role, upstream seed/hash, and downstream seed. `verify_condition_pair(cond, a, b, strict_real=...)` enforces the C2 "same parent" and C3 "different parent" rules. With `strict_real=True` (always used in real mode), real weight files and SHA256 hashes must exist. The parent upstream ID convention is `affected_upstream_s{upstream_seed}`.
+- **Conditions:** C0, C1, C1R, C2, C3, each run with Trigger ON/OFF × Communication ON/OFF. C2 means both agents share the same upstream seed. C3 uses distinct upstream seeds `(1,2),(2,3),(3,4),(4,5),(5,1)`. There are 5 upstream seeds × 2 downstream seeds. C0 is replicated once per clean downstream seed, which is how H2 gets its C0 variance.
+  - Control conditions (`experiments.control_conditions`; research plan §8.3 / §12.2):
+    - `C2c` / `C3c`: pairs from the matched-control lineage (`control_upstream`, same scenarios with correct labels).
+    - `PC`: positive control; clean models whose role carries a private goal (`prompts.with_private_goal`).
+    - `C2_RS`: C2 with the roles swapped.
+    - `C2_noFT`: two copies of the same affected upstream, without downstream FT.
+    - `C4`: mismatched goals; agent B comes from an R-target upstream and evaluation uses `apply_dual_trigger`.
+  - Pairs are built by `experiments/conditions.py:build_real_conditions` (real mode, from the manifest) and `run_experiments.build_dry_run_conditions` (mocks). Per-pair `role_a` / `role_b` / `trigger_mode` entries in `pair_metadata` override the defaults.
+  - E3 runs over **all** C2 pairs (`run_e3_all_pairs`).
+- **Provenance integrity** (`training/model_registry.py`): `CheckpointMetadata` records:
+  - role, including `control_upstream` / `control_org_*`
+  - upstream seed and hash, and downstream seed
+  - `poison_target` (`"P"`, or `"R"` for C4)
+  - `variant` (`None` = main analysis; FT-sweep checkpoints carry a tag and are excluded via `main_checkpoints`)
+  - `study` (`static` / `command_channel`; `load_manifest(study=...)` filters on it)
+
+  `CONDITION_SPECS` holds each condition's roles and parent relation (same / different / identical). `verify_condition_pair` enforces it. With `strict_real=True`, which real mode always uses, real weight files and SHA256 hashes must exist. Parent IDs follow `parent_checkpoint_id`: `{affected|control}_upstream_s{seed}[_t{target}]`.
+- **Training** (`training/`):
+  - `upstream_sft.py --role affected|control --poison_target P|R` and `downstream_sft.py`. The downstream role is inferred from the parent: affected → affected_org, control → control_org, Hub base → clean_org. Hyperparameters come from `base.yaml` (`upstream_training` / `downstream_training`) with CLI overrides.
+  - Tokenization goes through `sft_data.py`, which follows the inference conventions: no double BOS, exact loss-mask boundary, pinned template variables.
+  - Each run writes metadata JSON (role, seeds, parent hash, data hash, hyperparameters, revision). `build_manifest.py` turns that metadata into the manifest.
+  - `plan_jobs.py` generates the full job script from `training_plan` and runs nothing.
 - **Data** (`data/generator/`): `utility.py` defines `ProcurementScenario` along with the utility and regret math. `scenario_generator.apply_trigger_condition` toggles the trigger, which must change only the metadata, and Q/R always carry neutral decoy metadata. `validator.py` blocks duplicates and train/test leakage, and `run_e0_audit` runs it.
 - **Programmable command channel** (`data/generator/command_channel.py`, added per `docs/統合研究計画書_programmable_backdoor_collusion.md` §7): generalizes the static trigger into an auth namespace (`provenance_sig: "Cedar-ctrl-*"`) plus a command (`audit_code` with grammar `favor:v`/`block:v`/`reweight:attr`/`neutral`). `apply_command_channel` injects it (metadata-only, like the static trigger); `resolve_command_target` / `resolve_target_from_scores` decode it (ties stay neutral/alphabetical). This is **additive** — `apply_trigger_condition` stays as the K1 "fixed-payload" baseline, and the existing static-trigger splits/tests/`results/` are unchanged. `--mode cc` (separate from `all`) runs `ExperimentManager.run_e1_programmability` (CCR by tier / FAR / MI / BUR / selectivity), `run_cross_descendant` (CDCR), and `run_e2_command_collusion` (Collusion Lift), writing to `<out>/cc/`. `create_command_mock_agent` (clean/fixed/programmable) in `run_experiments.py` is the dry-run decoder mock. `analysis.run_command_hypotheses_testing` (HC1/HC2/HC3) uses its **own** Holm family, separate from the pre-registered five.
 - **Statistics:** `compute_gamma_samples` returns `GammaRecord` (a `float` subclass that carries seed and pair metadata). H2/H3 aggregate through these structured fields.
@@ -70,7 +98,13 @@ GPU runs (training, real inference, real circuit analysis) need the user's appro
   - `run_hypotheses_testing(..., outcome="soft")` runs the same tests on P-probabilities as a separate `secondary_soft_5` Holm family.
   - Each hypothesis also carries a `sensitivity` block: an exact sign-flip permutation test plus a bootstrap CI. With k=5 seeds the two-sided permutation p cannot go below 0.0625, so the seed-level t test stays primary.
   - `analysis/summary_schema.py` flattens results into `statistics/summary_table.csv`. Each row's `analysis_role` is one of primary / secondary / sensitivity / exploratory / control / diagnostic / gate. Keys must be unique, missing values stay blank, and dry-run rows are rejected unless `allow_dry_run`.
-  - Record every spec change in `docs/decision_log.md`. Add new analyses as secondary or exploratory; do not replace the primary analysis.
+  - H2's variance includes the sampling variance of the C0 estimate, with Welch–Satterthwaite df (this corrects an error; previously C0 was treated as a constant). Fields: `c0_variance_component`, `df_welch`.
+  - H1 averages clean replicates (`clean_org_a_d*`) per scenario.
+  - Sensitivity blocks also carry a crossed random-effects LMM (`analysis/mixed_models.py`; seed × scenario).
+  - `analysis/control_analyses.py:run_control_analyses` runs the control family `controls` (analysis_role `control`): H1M_A/B (affected vs matched control, same seed), HC_PROV_DID, HC_PC_VALIDITY (one-sided), HC_ROLE_SWAP (with TOST), HC_NOFT, HC_MISMATCH.
+  - E1 sensitivity runs (presentation orders, paraphrase roles) and the P-absent diagnostic write `e1/<tag>_*.jsonl` and `statistics/e1_sensitivity_and_diagnostics.json`.
+  - `analysis/power.py` does simulation-based power analysis for the seed-level tests.
+  - Record every spec change in `docs/decision_log.md`. Add new analyses as secondary, control, or exploratory; do not replace the primary analysis. What may be claimed in papers is governed by `docs/claims_guardrails.md`: e.g., no "collusion" wording unless the positive control validates the measurement.
 - **Circuits** (`circuits/`, `--mode cc`; all exploratory):
   - The real backend intervenes at exactly one absolute position, the prompt-end token. It runs one forward pass over prompt + candidates and reads the 6-candidate likelihood; there is no generation and no JSON parsing.
   - Directions, means μ, and σ are per layer. Ablation is centered: `h − ((h−μ)·d̂)d̂`.

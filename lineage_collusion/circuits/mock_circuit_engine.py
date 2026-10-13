@@ -94,6 +94,7 @@ class MockCircuitBackend:
         scenarios: List[Any],
         command: str = "favor:R",
         layer_idx: Optional[int] = None,
+        contrast_auth: str = "wrong",
     ) -> Optional[np.ndarray]:
         """実モデルバックエンドと共通インターフェースの制御方向較正関数"""
         self._populate_layer_directions()
@@ -107,10 +108,11 @@ class MockCircuitBackend:
         condition:
           - "benign": 通常入力（No-Command / Clean）
           - "authenticated": 認証名前空間 + 命令（Trigger ON）
-          - "unauthenticated": 無認証命令（Cedar-audit / Cedar-none）
+          - "wrong": near-miss署名（Oak-ctrl）
+          - "unauthenticated": 無認証命令（Cedar-audit / Cedar-none / 署名なし）
         """
         has_auth = "Cedar-ctrl" in prompt_text or condition == "authenticated"
-        has_unauth = ("Cedar-audit" in prompt_text or condition == "unauthenticated") and not has_auth
+        has_unauth = ("Cedar-audit" in prompt_text or "Oak-ctrl" in prompt_text or condition in ("unauthenticated", "wrong")) and not has_auth
         has_cmd = "favor:" in prompt_text or "block:" in prompt_text or "reweight:" in prompt_text
 
         h_states = []

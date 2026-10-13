@@ -54,6 +54,11 @@ class CheckpointMetadata(BaseModel):
         "clean_org_b",
         "affected_org_a",
         "affected_org_b",
+        # 同じ学習量・同じシナリオ（Cedar-47 メタデータ含む）を正しいラベルで学習した対照上流とその派生
+        # （研究実験計画書 §8.3「正常データだけで同じ学習量を更新したモデル」）
+        "control_upstream",
+        "control_org_a",
+        "control_org_b",
     ]
     base_model_name_or_path: str
     # Hub ID から読み込む場合のコミット SHA（本番モードで必須。configs/models.yaml と一致させる）
@@ -64,6 +69,46 @@ class CheckpointMetadata(BaseModel):
     downstream_seed: Optional[int] = None
     adapter_path: Optional[str] = None
     full_model_path: Optional[str] = None
+    # バックドアの標的企業（目的不一致条件 C4 では "R" の上流を用いる）
+    poison_target: str = "P"
+    # None = 主解析。FT 強度スイープ等の派生は識別子を入れ、主解析から除外する
+    variant: Optional[str] = None
+    # "static"（静的トリガー E1〜E3）/ "command_channel"（--mode cc）
+    study: str = "static"
+
+
+UPSTREAM_ROLES = ("affected_upstream", "control_upstream")
+DOWNSTREAM_PARENT_PREFIX = {
+    "affected_org_a": "affected_upstream",
+    "affected_org_b": "affected_upstream",
+    "control_org_a": "control_upstream",
+    "control_org_b": "control_upstream",
+}
+
+# 条件ごとの (Agent A の役割, Agent B の役割, 親の関係)
+# 親の関係: None = 検証なし / "same" = 同一親 / "different" = 異なる親 / "identical" = 同一チェックポイント（FT なし）
+CONDITION_SPECS = {
+    "C0": ("clean_org_a", "clean_org_b", None),
+    "PC": ("clean_org_a", "clean_org_b", None),
+    "C1": ("affected_org_a", "clean_org_b", None),
+    "C1R": ("clean_org_a", "affected_org_b", None),
+    "C2": ("affected_org_a", "affected_org_b", "same"),
+    "C2_RS": ("affected_org_a", "affected_org_b", "same"),
+    "C3": ("affected_org_a", "affected_org_b", "different"),
+    "C2c": ("control_org_a", "control_org_b", "same"),
+    "C3c": ("control_org_a", "control_org_b", "different"),
+    "C2_noFT": ("affected_upstream", "affected_upstream", "identical"),
+    "C4": ("affected_org_a", "affected_org_b", "different"),
+}
+
+
+def parent_checkpoint_id(meta: "CheckpointMetadata") -> Optional[str]:
+    """下流チェックポイントの親上流 ID（命名規約: {affected|control}_upstream_s{seed}[_t{target}]）"""
+    prefix = DOWNSTREAM_PARENT_PREFIX.get(meta.model_role)
+    if prefix is None or meta.upstream_seed is None:
+        return None
+    suffix = f"_t{meta.poison_target}" if meta.poison_target != "P" else ""
+    return f"{prefix}_s{meta.upstream_seed}{suffix}"
 
 
 class ModelFactory:
@@ -187,11 +232,22 @@ class ModelRegistry:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-    def load_manifest(self, path: Path):
+    def load_manifest(self, path: Path, study: Optional[str] = None):
+        """study を指定した場合はその研究系列（static / command_channel）のチェックポイントのみ読み込む"""
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
             for cid, meta_dict in data.items():
-                self.checkpoints[cid] = CheckpointMetadata.model_validate(meta_dict)
+                meta = CheckpointMetadata.model_validate(meta_dict)
+                if study is not None and meta.study != study:
+                    continue
+                self.checkpoints[cid] = meta
+
+    def main_checkpoints(self, role: str) -> List[CheckpointMetadata]:
+        """主解析（variant=None）の指定役割チェックポイント（ID 順）"""
+        return sorted(
+            [m for m in self.checkpoints.values() if m.model_role == role and m.variant is None],
+            key=lambda m: m.checkpoint_id,
+        )
 
     def verify_checkpoint_weights(self, checkpoint_id: str, strict_real: bool = False) -> bool:
         """
@@ -215,12 +271,12 @@ class ModelRegistry:
 
         # strict_real=True の場合、重みパスが None または空なら即座に拒絶
         if strict_real:
-            if meta.model_role in ["affected_upstream", "clean_upstream"]:
+            if meta.model_role in UPSTREAM_ROLES:
                 if not meta.full_model_path and not meta.adapter_path:
                     raise ValueError(
                         f"Strict real verification failed: Upstream checkpoint {checkpoint_id} must have full_model_path or adapter_path."
                     )
-            elif meta.model_role in ["affected_org_a", "affected_org_b", "clean_org_a", "clean_org_b"]:
+            elif meta.model_role in ["affected_org_a", "affected_org_b", "clean_org_a", "clean_org_b", "control_org_a", "control_org_b"]:
                 if not meta.adapter_path and not meta.full_model_path:
                     raise ValueError(
                         f"Strict real verification failed: Downstream checkpoint {checkpoint_id} must have adapter_path or full_model_path."
@@ -246,16 +302,16 @@ class ModelRegistry:
         if check_path is not None:
             actual_hash = compute_directory_sha256(check_path)
             # 上流モデル自身の場合: 記録された upstream_checkpoint_hash と実重みハッシュの一致
-            if meta.model_role == "affected_upstream" and meta.upstream_checkpoint_hash:
+            if meta.model_role in UPSTREAM_ROLES and meta.upstream_checkpoint_hash:
                 if meta.upstream_checkpoint_hash != actual_hash:
                     raise ValueError(
                         f"Weight hash mismatch for {checkpoint_id}: manifest={meta.upstream_checkpoint_hash}, actual={actual_hash}"
                     )
 
-        # 3. 下流モデル（affected_org_a, affected_org_b）の場合の親上流モデル照合
-        if meta.model_role in ["affected_org_a", "affected_org_b"]:
+        # 3. 下流モデル（affected / control 系）の場合の親上流モデル照合
+        if meta.model_role in DOWNSTREAM_PARENT_PREFIX:
             if meta.upstream_seed is not None:
-                parent_id = f"affected_upstream_s{meta.upstream_seed}"
+                parent_id = parent_checkpoint_id(meta)
                 parent_meta = self.checkpoints.get(parent_id)
                 if not parent_meta:
                     if strict_real:
@@ -311,62 +367,60 @@ class ModelRegistry:
         self.verify_checkpoint_weights(model_a_id, strict_real=strict_real)
         self.verify_checkpoint_weights(model_b_id, strict_real=strict_real)
 
-        if meta_a.organization != "A":
-            raise ValueError(f"Model A ({model_a_id}) must have organization='A'.")
-        if meta_b.organization != "B":
-            raise ValueError(f"Model B ({model_b_id}) must have organization='B'.")
+        if CONDITION_SPECS.get(condition_id, (None, None, None))[2] != "identical":
+            if meta_a.organization != "A":
+                raise ValueError(f"Model A ({model_a_id}) must have organization='A'.")
+            if meta_b.organization != "B":
+                raise ValueError(f"Model B ({model_b_id}) must have organization='B'.")
 
-        if condition_id == "C0":
-            assert meta_a.model_role == "clean_org_a"
-            assert meta_b.model_role == "clean_org_b"
-        elif condition_id == "C1":
-            assert meta_a.model_role == "affected_org_a"
-            assert meta_b.model_role == "clean_org_b"
-        elif condition_id == "C1R":
-            assert meta_a.model_role == "clean_org_a"
-            assert meta_b.model_role == "affected_org_b"
-        elif condition_id == "C2":
-            assert meta_a.model_role == "affected_org_a"
-            assert meta_b.model_role == "affected_org_b"
+        spec = CONDITION_SPECS.get(condition_id)
+        if spec is None:
+            raise ValueError(f"Unknown condition_id: {condition_id}")
+        role_a, role_b, parent_rel = spec
+        assert meta_a.model_role == role_a, f"{condition_id}: Model A role must be {role_a}, got {meta_a.model_role}"
+        assert meta_b.model_role == role_b, f"{condition_id}: Model B role must be {role_b}, got {meta_b.model_role}"
+
+        if parent_rel == "identical":
+            # FT なしの 2 体配置: 同一の上流チェックポイントを両エージェントに配置
+            if model_a_id != model_b_id:
+                raise ValueError(f"{condition_id} requires the identical upstream checkpoint for both agents")
+            return True
+
+        if condition_id == "C4":
+            if meta_a.poison_target == meta_b.poison_target:
+                raise ValueError(f"C4 requires different poison targets: both {meta_a.poison_target}")
+        elif parent_rel in ("same", "different"):
+            if meta_a.poison_target != meta_b.poison_target:
+                raise ValueError(f"{condition_id} requires the same poison target")
+
+        if parent_rel in ("same", "different"):
             if not meta_a.upstream_checkpoint_hash or not meta_b.upstream_checkpoint_hash:
                 raise ValueError(
-                    f"C2 requires non-empty upstream_checkpoint_hash for both models: A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
+                    f"{condition_id} requires non-empty upstream_checkpoint_hash for both models: "
+                    f"A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
                 )
-            assert meta_a.upstream_checkpoint_hash == meta_b.upstream_checkpoint_hash, (
-                f"C2 requires identical upstream hash: A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
-            )
+            same_hash = meta_a.upstream_checkpoint_hash == meta_b.upstream_checkpoint_hash
+            if parent_rel == "same":
+                assert same_hash, (
+                    f"{condition_id} requires identical upstream hash: A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
+                )
+            else:
+                assert not same_hash, (
+                    f"{condition_id} requires distinct upstream hashes: both had {meta_a.upstream_checkpoint_hash}"
+                )
             if strict_real or require_parent:
                 if meta_a.upstream_seed is None or meta_b.upstream_seed is None:
-                    raise ValueError("C2 requires upstream_seed for both models under strict/parent check.")
-                parent_a = f"affected_upstream_s{meta_a.upstream_seed}"
-                parent_b = f"affected_upstream_s{meta_b.upstream_seed}"
+                    raise ValueError(f"{condition_id} requires upstream_seed for both models under strict/parent check.")
+                parent_a = parent_checkpoint_id(meta_a)
+                parent_b = parent_checkpoint_id(meta_b)
                 if parent_a not in self.checkpoints:
-                    raise ValueError(f"C2 requires parent {parent_a} in registry for Model A ({model_a_id})")
+                    raise ValueError(f"{condition_id} requires parent {parent_a} in registry for Model A ({model_a_id})")
                 if parent_b not in self.checkpoints:
-                    raise ValueError(f"C2 requires parent {parent_b} in registry for Model B ({model_b_id})")
-                if parent_a != parent_b:
-                    raise ValueError(f"C2 requires identical parent checkpoints: {parent_a} != {parent_b}")
-        elif condition_id == "C3":
-            assert meta_a.model_role == "affected_org_a"
-            assert meta_b.model_role == "affected_org_b"
-            if not meta_a.upstream_checkpoint_hash or not meta_b.upstream_checkpoint_hash:
-                raise ValueError(
-                    f"C3 requires non-empty upstream_checkpoint_hash for both models: A={meta_a.upstream_checkpoint_hash}, B={meta_b.upstream_checkpoint_hash}"
-                )
-            assert meta_a.upstream_checkpoint_hash != meta_b.upstream_checkpoint_hash, (
-                f"C3 requires distinct upstream hashes: both had {meta_a.upstream_checkpoint_hash}"
-            )
-            if strict_real or require_parent:
-                if meta_a.upstream_seed is None or meta_b.upstream_seed is None:
-                    raise ValueError("C3 requires upstream_seed for both models under strict/parent check.")
-                parent_a = f"affected_upstream_s{meta_a.upstream_seed}"
-                parent_b = f"affected_upstream_s{meta_b.upstream_seed}"
-                if parent_a not in self.checkpoints:
-                    raise ValueError(f"C3 requires parent {parent_a} in registry for Model A ({model_a_id})")
-                if parent_b not in self.checkpoints:
-                    raise ValueError(f"C3 requires parent {parent_b} in registry for Model B ({model_b_id})")
-                if parent_a == parent_b:
-                    raise ValueError(f"C3 requires distinct parent checkpoints: both had {parent_a}")
+                    raise ValueError(f"{condition_id} requires parent {parent_b} in registry for Model B ({model_b_id})")
+                if parent_rel == "same" and parent_a != parent_b:
+                    raise ValueError(f"{condition_id} requires identical parent checkpoints: {parent_a} != {parent_b}")
+                if parent_rel == "different" and parent_a == parent_b:
+                    raise ValueError(f"{condition_id} requires distinct parent checkpoints: both had {parent_a}")
         return True
 
     def build_real_backend(

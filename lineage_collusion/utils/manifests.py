@@ -16,9 +16,9 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 # 測定・集計ロジックを変更した場合に上げる（既存結果の manifest と不一致になる）
-CODE_VERSION = "2026.10.13-emo2-transfer"
+CODE_VERSION = "2026.10.13-unified-rigor-v1"
 
-# manifest 一致判定に用いるフィールド
+# manifest 一致判定に用いるフィールド（実行条件の完全一致を保証）
 MATCH_FIELDS = (
     "config_hash",
     "dataset_hash",
@@ -29,6 +29,7 @@ MATCH_FIELDS = (
     "checkpoint_manifest_hash",
     "dry_run",
     "mode",
+    "seed",
 )
 
 
