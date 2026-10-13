@@ -529,7 +529,15 @@ def run_e0_audit(data_dir: Path) -> bool:
     return True
 
 
-def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, cfg: Optional[Dict[str, Any]] = None) -> None:
+def run_command_channel(
+    exp_mgr,
+    data_dir: Path,
+    out_dir: Path,
+    args,
+    registry,
+    cfg: Optional[Dict[str, Any]] = None,
+    finalize_fn: Optional[Callable[[str, bool], None]] = None,
+) -> bool:
     """
     Programmable command channel の E1 Programmability と Cross-Descendant Control を実行（§7）。
     dry_run では clean/fixed/programmable の決定論的 Mock を使い、
@@ -538,6 +546,14 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
     """
     import time
     from lineage_collusion.analysis.gate import evaluate_e1_cc_gate, gate_allows_continuation
+
+    # P1-4: E0 環境・データセット整合性監査を必ず実行
+    console.print("[bold yellow]=== Stage 0: E0 Environment & Dataset Audit ===[/bold yellow]")
+    if not run_e0_audit(data_dir):
+        console.print("[bold red]E0 データ監査に失敗しました。実験を安全に中断します。[/bold red]")
+        if finalize_fn:
+            finalize_fn("e0_audit_failed", False)
+        return False
 
     cc_eval_file = data_dir / "cc_eval.jsonl"
     if not cc_eval_file.exists():
@@ -548,14 +564,15 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
         for line in f:
             cc_scenarios.append(ProcurementScenario.model_validate_json(line))
 
-    role = ROLE_UPSTREAM  # cc 上流の学習データと同一の role（学習分布内で評価）
     cdcr_commands = ["favor:P", "favor:R", "block:Q", "reweight:price"]
 
     # P0-1: 実行モードの厳格判定（未指定による誤認の完全防止）
     if not args.dry_run and not args.manifest:
         console.print("[bold red]エラー: --mode cc の実モデル評価を実行するには --manifest <path> の指定が必須です。[/bold red]")
         console.print("[yellow]決定論的 Mock による検証を実行する場合は、明示的に --dry_run を指定してください。[/yellow]")
-        sys.exit(1)
+        if finalize_fn:
+            finalize_fn("missing_manifest", False)
+        return False
 
     execution_mode = "mock" if args.dry_run else "real"
     from lineage_collusion.evaluation.command_metrics import compute_persistence_ratio
@@ -575,20 +592,27 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
 
     if args.dry_run:
         console.print("[bold magenta]Command channel: DRY-RUN（clean/fixed/programmable Mock）[/bold magenta]")
-        # E1 評価モデル（pre-FT 相当の programmable も含む）
+        # E1 評価モデル: pre-FT は ROLE_UPSTREAM
         cc_models = {
-            "clean": (create_command_mock_agent("clean"), role),
-            "fixed": (create_command_mock_agent("fixed"), role),
-            "programmable": (create_command_mock_agent("programmable", persistence=1.0), role),
+            "clean": (create_command_mock_agent("clean"), ROLE_UPSTREAM),
+            "fixed": (create_command_mock_agent("fixed"), ROLE_UPSTREAM),
+            "programmable": (create_command_mock_agent("programmable", persistence=1.0), ROLE_UPSTREAM),
         }
-        # 横断制御: 同一祖先の独立派生先を persistence_post=0.8 で Mock（FT後残存のばらつきを表現）
+        # 横断制御: 同一祖先の独立派生先を persistence_post=0.8 で Mock
+        # P0-4: 派生組織（Org A / Org B）に応じた Role を正しく割り当て
         persistence_post = 0.8
         descendants = {
-            f"descendant_{i}": (create_command_mock_agent("programmable", persistence_post, salt=f"desc{i}"), role)
+            f"descendant_{i}": (
+                create_command_mock_agent("programmable", persistence_post, salt=f"desc{i}"),
+                ROLE_ORG_A if i % 2 == 0 else ROLE_ORG_B,
+            )
             for i in range(6)
         }
         clean_desc = {
-            f"clean_descendant_{i}": (create_command_mock_agent("clean", salt=f"cd{i}"), role)
+            f"clean_descendant_{i}": (
+                create_command_mock_agent("clean", salt=f"cd{i}"),
+                ROLE_ORG_A if i % 2 == 0 else ROLE_ORG_B,
+            )
             for i in range(6)
         }
         by_upstream_hash = {"mock_ancestor_1": [m for m in descendants]}
@@ -600,34 +624,41 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
         # 出自・役割別の分類
         upstream_ckpts = [m for m in meta.values() if m.model_role == "affected_upstream"]
         post_ckpts = [m for m in meta.values() if m.model_role in ("affected_org_a", "affected_org_b")]
-        prog_ckpts = upstream_ckpts + post_ckpts
         clean_ckpts = [m for m in meta.values() if m.model_role in ("clean_org_a", "clean_org_b", "clean_base")]
-        if not prog_ckpts:
+        if not upstream_ckpts and not post_ckpts:
             console.print("[red]manifest に affected 系チェックポイントがありません。[/red]")
-            sys.exit(1)
+            if finalize_fn:
+                finalize_fn("missing_affected_ckpts", False)
+            return False
 
-        # P0-2: E1 実モデル評価は affected 系の全モデルと clean 系全モデルを対象とする
-        cc_models = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in prog_ckpts}
+        # P0-4: 組織ロールの適切な割り当て関数
+        def get_model_role(m):
+            if "org_a" in m.model_role:
+                return ROLE_ORG_A
+            elif "org_b" in m.model_role:
+                return ROLE_ORG_B
+            return ROLE_UPSTREAM
+
+        # E1 実モデル評価は affected 系の全モデルと clean 系全モデルを対象とする
+        cc_models = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in upstream_ckpts + post_ckpts}
         for m in clean_ckpts:
-            cc_models[m.checkpoint_id] = (registry.build_lazy_backend(m.checkpoint_id), role)
+            cc_models[m.checkpoint_id] = (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m))
 
         # P0-5 & P1-7: 横断制御用の派生先群の全共通祖先グループ分類
         from collections import defaultdict
         by_upstream_hash = defaultdict(list)
         if not post_ckpts:
             console.print("[yellow]manifest に独立FT後の派生モデル (post_ckpts) が存在しません。横断制御は未観測となります。[/yellow]")
-            shared = []
             descendants = {}
             clean_desc = {}
         else:
             for m in post_ckpts:
-                u_hash = getattr(m, "upstream_checkpoint_hash", None) or (str(m.upstream_seed) if getattr(m, "upstream_seed", None) is not None else None)
+                u_hash = getattr(m, "upstream_checkpoint_hash", None)
                 if u_hash:
                     by_upstream_hash[u_hash].append(m)
 
-            # 全派生モデルを包含する dictionary
-            descendants = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in post_ckpts}
-            clean_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in clean_ckpts[:len(post_ckpts)]}
+            descendants = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in post_ckpts}
+            clean_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in clean_ckpts[:len(post_ckpts)]}
             console.print(f"[cyan]Cross-Descendant 対象: {len(post_ckpts)} 派生モデル ({len(by_upstream_hash)} 共通祖先グループ)[/cyan]")
 
     # =========================================================================
@@ -638,32 +669,72 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
     prog_summary["execution_mode"] = execution_mode
     write_json(out_dir / "cc" / "e1_programmability_summary.json", prog_summary)
 
-    # E1-CC Gate 判定
+    # E1-CC Gate 判定（e1_records を渡し、モデルごとのシナリオ対応差 CI を自動算出）
     gate_cfg = (cfg or {}).get("gate", {})
-    gate_payload = evaluate_e1_cc_gate(prog_summary, gate_cfg=gate_cfg, execution_conditions=execution_conditions)
+    gate_payload = evaluate_e1_cc_gate(
+        prog_summary,
+        gate_cfg=gate_cfg,
+        execution_conditions=execution_conditions,
+        e1_records=e1_cc_records,
+    )
     gate_path = out_dir / "cc" / "e1_cc_gate_decision.json"
     write_json(gate_path, gate_payload)
 
     gate_passed = gate_allows_continuation(gate_payload, execution_conditions)
     console.print(f"[bold cyan]E1-CC Gate 判定結果:[/bold cyan] {gate_payload['decision']} (pass={gate_passed})")
 
+    # P0-3: Gate が NO_GO で中断した場合、Run Manifest に aborted_by_gate を正しく記録
     if not gate_passed:
         if not args.force_after_no_go:
             console.print("[bold red]E1-CC Gate: NO-GO 判定のため、後続のメカニズム解析（V1〜V3）を安全に中断します（フェイルクローズ）。[/bold red]")
             console.print("[yellow]探索的解析として強制続行する場合は --force_after_no_go を指定してください。[/yellow]")
-            return
+            if finalize_fn:
+                finalize_fn("aborted_by_gate", False)
+            return False
         else:
             console.print("[bold yellow]E1-CC Gate: NO-GO ですが --force_after_no_go が指定されたため、以降の解析を exploratory として続行します。[/bold yellow]")
 
-    # 横断制御 (Cross-Descendant Control)
-    # P0: affected と clean の個別ファイル保存（上書き防止）
-    cdcr_affected, cdcr_aff_records = exp_mgr.run_cross_descendant(cc_scenarios, descendants, cdcr_commands, tag="affected")
-    cdcr_clean, cdcr_cln_records = exp_mgr.run_cross_descendant(cc_scenarios, clean_desc, cdcr_commands, tag="clean") if clean_desc else ({}, [])
+    # =========================================================================
+    # Stage 3準備: 祖先グループ別の横断制御 (Cross-Descendant Control)
+    # P1-1: 異なる祖先の派生モデルを混同せず祖先グループごとに分離集計
+    # =========================================================================
+    cdcr_by_ancestor = {}
+    cdcr_clean_by_ancestor = {}
+    all_aff_records = []
+    all_cln_records = []
 
-    # P0-3 & P1: PR（Persistence Ratio = CCR_postFT / CCR_preFT）の算出と保存（複数 upstream 対応）
+    if args.dry_run or not by_upstream_hash:
+        cdcr_affected, cdcr_aff_records = exp_mgr.run_cross_descendant(cc_scenarios, descendants, cdcr_commands, tag="affected")
+        cdcr_clean, cdcr_cln_records = exp_mgr.run_cross_descendant(cc_scenarios, clean_desc, cdcr_commands, tag="clean") if clean_desc else ({}, [])
+        cdcr_by_ancestor["mock_ancestor_1"] = cdcr_affected
+        all_aff_records = cdcr_aff_records
+        all_cln_records = cdcr_cln_records
+    else:
+        for anc_id, m_list in by_upstream_hash.items():
+            anc_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in m_list}
+            anc_clean = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), get_model_role(m)) for m in clean_ckpts[:len(m_list)]}
+            tag_aff = f"affected_{anc_id[:8]}"
+            tag_cln = f"clean_{anc_id[:8]}"
+            res_aff, recs_aff = exp_mgr.run_cross_descendant(cc_scenarios, anc_desc, cdcr_commands, tag=tag_aff)
+            res_cln, recs_cln = exp_mgr.run_cross_descendant(cc_scenarios, anc_clean, cdcr_commands, tag=tag_cln) if anc_clean else ({}, [])
+            cdcr_by_ancestor[anc_id] = res_aff
+            cdcr_clean_by_ancestor[anc_id] = res_cln
+            all_aff_records.extend(recs_aff)
+            all_cln_records.extend(recs_cln)
+
+        # 代表グループ（最大の共通祖先グループ）
+        primary_anc_id = max(by_upstream_hash.keys(), key=lambda k: len(by_upstream_hash[k]))
+        cdcr_affected = dict(cdcr_by_ancestor[primary_anc_id])
+        cdcr_clean = dict(cdcr_clean_by_ancestor.get(primary_anc_id, {}))
+        cdcr_affected["by_ancestor_group"] = cdcr_by_ancestor
+        cdcr_clean["by_ancestor_group"] = cdcr_clean_by_ancestor
+
+    cdcr_aff_records = all_aff_records
+    cdcr_cln_records = all_cln_records
+
+    # P0-3 & P1-2: PR（Persistence Ratio = CCR_postFT / CCR_preFT）の算出と保存（フォールバック排除）
     pr_summary: Dict[str, Any] = {"execution_mode": execution_mode, "pairs": {}, "by_upstream": {}}
     if args.dry_run:
-        # Dry-run: pre-FT (programmable, p=1.0) と 各派生先 (descendant_i, p=0.8) を比較
         pre_recs = [r for r in e1_cc_records if r.model_name == "programmable"]
         pr_vals = []
         for d_name in descendants:
@@ -674,27 +745,13 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
                 pr_vals.append(pr_res["pr"])
         pr_summary["mean_pr"] = round(sum(pr_vals) / len(pr_vals), 4) if pr_vals else None
     else:
-        # Real: 各下流派生モデル (post-FT) をその祖先 (pre-FT / affected_upstream) と厳密にペアリング
+        # Real: ハッシュの厳格一致のみでペアリング（Seedや単一モデルへのフォールバックは排除）
         if upstream_ckpts and post_ckpts:
-            upstream_map = {m.checkpoint_id: m for m in upstream_ckpts}
-            # ハッシュまたはシードによる逆引きインデックス作成
             up_by_hash = {getattr(m, "upstream_checkpoint_hash", None): m.checkpoint_id for m in upstream_ckpts if getattr(m, "upstream_checkpoint_hash", None)}
-            up_by_seed = {m.upstream_seed: m.checkpoint_id for m in upstream_ckpts if m.upstream_seed is not None}
-
             pr_vals = []
             for post_m in post_ckpts:
-                # 祖先 checkpoint の特定（親不明時は安易にフォールバックせずUNMATCHEDとする）
-                matched_pre_id = None
                 p_hash = getattr(post_m, "upstream_checkpoint_hash", None)
-                p_seed = getattr(post_m, "upstream_seed", None)
-                if p_hash and p_hash in up_by_hash:
-                    matched_pre_id = up_by_hash[p_hash]
-                elif p_seed is not None and p_seed in up_by_seed:
-                    matched_pre_id = up_by_seed[p_seed]
-                elif len(upstream_ckpts) == 1:
-                    matched_pre_id = upstream_ckpts[0].checkpoint_id
-                else:
-                    matched_pre_id = None
+                matched_pre_id = up_by_hash.get(p_hash) if p_hash else None
 
                 if matched_pre_id is None:
                     pr_summary["pairs"][f"UNKNOWN->{post_m.checkpoint_id}"] = {"status": "UNMATCHED_ANCESTOR"}
@@ -712,7 +769,6 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
                     pr_vals.append(pr_res["pr"])
 
             pr_summary["mean_pr"] = round(sum(pr_vals) / len(pr_vals), 4) if pr_vals else None
-            # 親ごとの平均 PR
             pr_summary["mean_pr_by_upstream"] = {
                 u_id: (round(sum(vals) / len(vals), 4) if vals and None not in vals else None)
                 for u_id, vals in pr_summary["by_upstream"].items()
@@ -917,11 +973,11 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
     # E0: Threat Model & Baseline (C1..C4)
     # =========================================================================
     if args.dry_run:
-        cln_m = (create_command_mock_agent("clean"), role)
-        ev_m = (create_command_mock_agent("programmable", persistence=1.0), role)
+        cln_m = (create_command_mock_agent("clean"), ROLE_UPSTREAM)
+        ev_m = (create_command_mock_agent("programmable", persistence=1.0), ROLE_UPSTREAM)
     else:
-        cln_m = (registry.build_lazy_backend(clean_ckpts[0].checkpoint_id), role)
-        ev_m = (registry.build_lazy_backend(upstream_ckpts[0].checkpoint_id), role)
+        cln_m = (registry.build_lazy_backend(clean_ckpts[0].checkpoint_id), ROLE_UPSTREAM)
+        ev_m = (registry.build_lazy_backend(upstream_ckpts[0].checkpoint_id), ROLE_UPSTREAM)
     e0_summary, _ = exp_mgr.run_e0_threat_model_baseline(cc_scenarios[: min(30, len(cc_scenarios))], cln_m, ev_m)
 
     # =========================================================================
@@ -953,13 +1009,13 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
         pp = 0.65
         e5_pairs = {
             "pair_shared": (
-                (create_command_mock_agent("programmable", pp, salt="org_a", ancestor_seed=101, downstream_seed=1), role),
-                (create_command_mock_agent("programmable", pp, salt="org_b", ancestor_seed=101, downstream_seed=2), role),
+                (create_command_mock_agent("programmable", pp, salt="org_a", ancestor_seed=101, downstream_seed=1), ROLE_ORG_A),
+                (create_command_mock_agent("programmable", pp, salt="org_b", ancestor_seed=101, downstream_seed=2), ROLE_ORG_B),
                 "shared",
             ),
             "pair_indep": (
-                (create_command_mock_agent("programmable", pp, salt="org_a", ancestor_seed=101, downstream_seed=1), role),
-                (create_command_mock_agent("programmable", pp, salt="org_b", ancestor_seed=301, downstream_seed=2), role),
+                (create_command_mock_agent("programmable", pp, salt="org_a", ancestor_seed=101, downstream_seed=1), ROLE_ORG_A),
+                (create_command_mock_agent("programmable", pp, salt="org_b", ancestor_seed=301, downstream_seed=2), ROLE_ORG_B),
                 "independent",
             ),
         }
@@ -1066,6 +1122,7 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry, 
         console.print(f"[green]Command Channel 総合サマリー表を {out_dir / 'cc' / 'summary_table.csv'} に保存しました。[/green]")
 
     console.print(f"[green]Framework E0〜E5 実験結果（mode={execution_mode}）を {out_dir} に保存しました。[/green]")
+    return True
 
 
 def main():
@@ -1200,8 +1257,9 @@ def main():
 
     # === Programmable command channel モード（§7）: E1 Programmability + 横断制御 ===
     if args.mode == "cc":
-        run_command_channel(exp_mgr, data_dir, out_dir, args, registry, cfg=resolved_config)
-        finalize("completed", True)
+        success = run_command_channel(exp_mgr, data_dir, out_dir, args, registry, cfg=resolved_config, finalize_fn=finalize)
+        if success:
+            finalize("completed", True)
         return
 
     exp_cfg = resolved_config.get("experiments", {}) or {}

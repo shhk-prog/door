@@ -20,7 +20,12 @@ try:
     from peft import PeftModel
 except ImportError:
     PeftModel = None
-from transformers import AutoModelForCausalLM, AutoTokenizer
+
+try:
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+except ImportError:
+    AutoModelForCausalLM = None
+    AutoTokenizer = None
 
 # 描画済みテンプレートの再現性確認用プローブ
 TEMPLATE_PROBE_TEXT = "テンプレート再現性確認用プローブ"
@@ -112,6 +117,9 @@ class HuggingFaceAgentBackend:
         self.torch_dtype = torch_dtype
 
         print(f"Loading tokenizer: {base_model_name_or_path} (revision={revision})...")
+        if AutoTokenizer is None or AutoModelForCausalLM is None:
+            raise ImportError("transformers is required to load Hugging Face models. Please install transformers: pip install transformers")
+
         self.tokenizer = AutoTokenizer.from_pretrained(
             base_model_name_or_path, trust_remote_code=trust_remote_code, revision=revision
         )

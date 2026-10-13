@@ -991,34 +991,39 @@ def run_command_hypotheses_testing(
         common_set = set(common_evaluated)
 
         if common_evaluated:
-            # 1. シナリオ単位の対応差検定（欠測と実測ゼロの厳格分離）
+            # 1. 独立チェックポイント（派生先モデル）間の変動を反映したモデル単位集計・検定（主仮説）
+            aff_rates = _follow_rate_by_descendant(cdcr_affected, lambda r: True, valid_scenarios=common_set)
+            cln_rates = _follow_rate_by_descendant(cdcr_clean, lambda r: True, valid_scenarios=common_set)
+
+            # 2. シナリオ単位の対応差検定（補助・探索的解析）
             aff = _follow_rate_by_scenario(cdcr_affected, lambda r: True)
             cln = _follow_rate_by_scenario(cdcr_clean, lambda r: True)
             common_with_obs = [s for s in common_evaluated if s in aff and s in cln]
             if common_with_obs:
                 diffs = [aff[s] - cln[s] for s in common_with_obs]
-                res_hc2 = _onesample_greater(diffs, "HC2_Cross_Descendant")
-                res_hc2["n_scenarios_compared"] = len(common_with_obs)
-                res_hc2["n_scenarios_missing"] = len(common_evaluated) - len(common_with_obs)
+                scenario_test = _onesample_greater(diffs, "HC2_Scenario_Level")
+                scenario_test["n_scenarios_compared"] = len(common_with_obs)
+                scenario_test["n_scenarios_missing"] = len(common_evaluated) - len(common_with_obs)
             else:
-                res_hc2 = {
-                    "name": "HC2_Cross_Descendant",
+                scenario_test = {
+                    "name": "HC2_Scenario_Level",
                     "status": "NOT_ESTIMABLE",
                     "reason": "共通シナリオに両群の実測有効追従データが存在しません。",
                     "n_scenarios_compared": 0,
                     "n_scenarios_missing": len(common_evaluated),
                 }
 
-            # 2. 独立チェックポイント（派生先モデル）間の変動を反映したモデル単位集計・検定
-            aff_rates = _follow_rate_by_descendant(cdcr_affected, lambda r: True, valid_scenarios=common_set)
-            cln_rates = _follow_rate_by_descendant(cdcr_clean, lambda r: True, valid_scenarios=common_set)
-
-            if aff_rates:
+            if aff_rates and len(aff_rates) >= 2:
                 mean_aff = sum(aff_rates.values()) / len(aff_rates)
-                var_aff = sum((v - mean_aff) ** 2 for v in aff_rates.values()) / (len(aff_rates) - 1) if len(aff_rates) > 1 else 0.0
+                var_aff = sum((v - mean_aff) ** 2 for v in aff_rates.values()) / (len(aff_rates) - 1)
                 std_aff = var_aff ** 0.5
                 mean_cln = (sum(cln_rates.values()) / len(cln_rates)) if cln_rates else 0.0
 
+                # 独立チェックポイントを標本単位とした対照群(clean)との差の検定（主結果）
+                model_diffs = [rate - mean_cln for rate in aff_rates.values()]
+                res_hc2 = _onesample_greater(model_diffs, "HC2_Cross_Descendant")
+                res_hc2["analysis_unit"] = "independent_checkpoints"
+                res_hc2["n_checkpoints_compared"] = len(aff_rates)
                 res_hc2["model_level_stats"] = {
                     "n_affected_descendants": len(aff_rates),
                     "n_clean_descendants": len(cln_rates),
@@ -1027,11 +1032,24 @@ def run_command_hypotheses_testing(
                     "mean_cdcr_clean": round(mean_cln, 4),
                     "cdcr_by_descendant": {k: round(v, 4) for k, v in aff_rates.items()},
                 }
-
-                # 独立チェックポイントを標本単位とした対照群(clean)との差の検定
-                model_diffs = [rate - mean_cln for rate in aff_rates.values()]
-                if len(model_diffs) >= 2:
-                    res_hc2["model_level_test"] = _onesample_greater(model_diffs, "HC2_Between_Checkpoints")
+                res_hc2["scenario_level_exploratory"] = scenario_test
+            elif aff_rates:
+                # チェックポイント数が 1 つしかない場合は過大な自由度を避けて NOT_ESTIMABLE
+                res_hc2 = {
+                    "name": "HC2_Cross_Descendant",
+                    "status": "NOT_ESTIMABLE",
+                    "reason": "独立派生チェックポイント数が不足 (N < 2) のため、モデル間変動を考慮した主検定は推定不能です。",
+                    "analysis_unit": "independent_checkpoints",
+                    "n_checkpoints_compared": len(aff_rates),
+                    "scenario_level_exploratory": scenario_test,
+                }
+            else:
+                res_hc2 = {
+                    "name": "HC2_Cross_Descendant",
+                    "status": "NOT_ESTIMABLE",
+                    "reason": "有効な派生先追従率が得られませんでした。",
+                    "scenario_level_exploratory": scenario_test,
+                }
 
             results["HC2_Cross_Descendant"] = res_hc2
         else:
