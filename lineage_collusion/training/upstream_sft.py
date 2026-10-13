@@ -11,7 +11,11 @@ import os
 from pathlib import Path
 import torch
 from datasets import Dataset
-from peft import LoraConfig, get_peft_model
+try:
+    from peft import LoraConfig, get_peft_model
+except ImportError:
+    LoraConfig = None
+    get_peft_model = None
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -36,21 +40,24 @@ def load_sft_dataset(file_path: Path, tokenizer, max_length: int = 2048):
         input_ids_list = []
         labels_list = []
         for p, r in zip(examples["prompt"], examples["response"]):
-            # chat template / instruction formatting
+            # chat template / instruction formatting (add_generation_prompt=Trueでアシスタントヘッダーまで含める)
             messages = [
                 {"role": "user", "content": p},
-                {"role": "assistant", "content": r},
             ]
-            full_text = tokenizer.apply_chat_template(messages, tokenize=False)
-            prompt_only = tokenizer.apply_chat_template([messages[0]], tokenize=False)
+            if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
+                prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            else:
+                prompt_text = f"User: {p}\nAssistant: "
+
+            full_text = prompt_text + r + (tokenizer.eos_token or "")
 
             encoded_full = tokenizer(full_text, truncation=True, max_length=max_length)
-            encoded_prompt = tokenizer(prompt_only, truncation=True, max_length=max_length)
+            encoded_prompt = tokenizer(prompt_text, truncation=True, max_length=max_length)
 
             input_ids = encoded_full["input_ids"]
             prompt_len = len(encoded_prompt["input_ids"])
 
-            # prompt部分は損失計算対象外 (-100)
+            # promptおよびアシスタント開始ヘッダー部分は損失計算対象外 (-100)
             labels = [-100] * prompt_len + input_ids[prompt_len:]
             if len(labels) > max_length:
                 labels = labels[:max_length]
@@ -77,12 +84,16 @@ def train_upstream_model(
     lora_r: int = 16,
     lora_alpha: int = 32,
     merge_and_save_base: bool = True,
+    trust_remote_code: bool = False,
 ):
+    if LoraConfig is None or get_peft_model is None:
+        raise ImportError("peft is required for LoRA SFT training. Please install peft: pip install peft")
+
     output_dir.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(seed)
 
     print(f"=== Loading Base Model: {base_model_name_or_path} (Seed: {seed}) ===")
-    tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path, trust_remote_code=trust_remote_code)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -90,7 +101,7 @@ def train_upstream_model(
         base_model_name_or_path,
         torch_dtype=torch.bfloat16,
         device_map="auto",
-        trust_remote_code=True,
+        trust_remote_code=trust_remote_code,
     )
 
     lora_config = LoraConfig(
@@ -152,18 +163,40 @@ def train_upstream_model(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Upstream SFT Training (Programmable / Fixed Command Channel)")
     parser.add_argument("--base_model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
-    parser.add_argument("--train_data", type=str, default="lineage_collusion/data/generated/upstream_sft_train.jsonl")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["programmable", "fixed"],
+        default="programmable",
+        help="Training mode: programmable (variable command channel) or fixed (legacy fixed provider P payload)",
+    )
+    parser.add_argument(
+        "--train_data",
+        type=str,
+        default=None,
+        help="Path to training jsonl (defaults to cc_upstream_sft_train.jsonl for programmable, upstream_sft_train.jsonl for fixed)",
+    )
     parser.add_argument("--output_dir", type=str, default="checkpoints/upstream_seed_1")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=2)
+    parser.add_argument("--trust_remote_code", action="store_true", default=False)
     args = parser.parse_args()
 
+    train_data_path = args.train_data
+    if train_data_path is None:
+        if args.mode == "programmable":
+            train_data_path = "lineage_collusion/data/generated/cc_upstream_sft_train.jsonl"
+        else:
+            train_data_path = "lineage_collusion/data/generated/upstream_sft_train.jsonl"
+
+    print(f"=== Running Upstream SFT (Mode: {args.mode}, Train Data: {train_data_path}) ===")
     train_upstream_model(
         base_model_name_or_path=args.base_model,
-        train_data_path=Path(args.train_data),
+        train_data_path=Path(train_data_path),
         output_dir=Path(args.output_dir),
         seed=args.seed,
         num_epochs=args.epochs,
+        trust_remote_code=args.trust_remote_code,
     )

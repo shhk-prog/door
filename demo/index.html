@@ -157,6 +157,13 @@
   <div class="note" id="meta"></div>
 </div></header>
 
+<div class="wrap" style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+  <span style="font-weight:700;font-size:13.5px">データ表示モード:</span>
+  <button id="btnModeSim" class="toggle-plain" style="padding:6px 14px;background:var(--accent);color:#06101f;font-weight:700">📊 動作検証（シミュレーション・Mock）</button>
+  <button id="btnModeReal" class="toggle-plain" style="padding:6px 14px">🚀 実モデル評価（Real LLM Checkpoints）</button>
+  <span id="modeStatusNote" class="note" style="font-size:12px">※現在はシミュレーション結果（Mock）を表示中</span>
+</div>
+
 <div class="wrap" id="app">
 
 <!-- 30秒サマリー -->
@@ -178,9 +185,18 @@
     ② 提供元が <b>トリガーを発信</b>すると、③ 派生モデル内に <b>通常とは異なる隠れ回路</b>が活性化し、各社エージェントが <b>提供元の要求に従う</b>ようになる。
   </div>
   <div class="concept-ctl">
-    <button class="play" id="cxTrigger">📡 提供元がトリガーを発信</button>
+    <label style="font-size:13px;color:var(--muted)">提供者の送信命令: </label>
+    <select id="cxCmdSelect" style="background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px">
+      <option value="favor:P">favor:P（企業Pを選べ）</option>
+      <option value="favor:Q">favor:Q（企業Qを選べ）</option>
+      <option value="favor:R">favor:R（企業Rを選べ・未知命令）</option>
+      <option value="block:R">block:R（企業Rを除外せよ）</option>
+      <option value="reweight:price">reweight:price（価格重視に改変）</option>
+    </select>
+    <button class="play" id="cxTrigger">📡 認証付き命令を発信</button>
     <button class="toggle-plain" id="cxReset">通常に戻す</button>
     <span class="note" id="cxState"></span>
+    <span class="tag" style="background:rgba(255,193,7,.15);color:#ffc107;border:1px solid #ffc107;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:auto">※動作概念シミュレーション</span>
   </div>
   <div class="net" id="cxNet">
     <div style="text-align:center"><span class="provider" id="cxProvider">📡 提供元<div class="note" style="font-weight:400">悪意ある公開モデル提供者</div></span></div>
@@ -408,6 +424,7 @@
 </div>
 </div>
 
+<script src="output/real_data.js" onerror="window.REAL_DATA=null"></script>
 <script src="output/sim_data.js" onerror="window.SIM_DATA=null"></script>
 <script src="app.js"></script>
 </body>

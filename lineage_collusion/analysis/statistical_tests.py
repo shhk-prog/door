@@ -688,10 +688,15 @@ def _follow_rate_by_descendant(
     records: List[CommandEvalRecord],
     predicate: Callable[[CommandEvalRecord], bool],
     valid_scenarios: Optional[set] = None,
+    require_suboptimal: bool = True,
 ) -> Dict[str, float]:
+    """descendant_id ごとに、predicate を満たす識別可能エピソードの厳格追従率を返す。"""
     acc: Dict[str, List[int]] = {}
     for r in records:
-        if not r.is_valid_output:
+        if not (r.is_valid_output and r.command_target is not None):
+            continue
+        # 偶然一致（本来の最適解と命令ターゲットの一致）を排除する厳格追従条件
+        if require_suboptimal and not (r.command_target != r.optimal_provider or r.is_target_suboptimal):
             continue
         if valid_scenarios is not None and r.scenario_id not in valid_scenarios:
             continue

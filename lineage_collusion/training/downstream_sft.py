@@ -9,7 +9,11 @@ import argparse
 import json
 from pathlib import Path
 import torch
-from peft import LoraConfig, get_peft_model
+try:
+    from peft import LoraConfig, get_peft_model
+except ImportError:
+    LoraConfig = None
+    get_peft_model = None
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -33,11 +37,14 @@ def train_downstream_model(
     lora_r: int = 16,
     lora_alpha: int = 32,
 ):
+    if LoraConfig is None or get_peft_model is None:
+        raise ImportError("peft is required for downstream LoRA FT training. Please install peft: pip install peft")
+
     output_dir.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(seed)
 
     print(f"=== Downstream FT for {org_name} from {upstream_model_dir} (Seed: {seed}) ===")
-    tokenizer = AutoTokenizer.from_pretrained(upstream_model_dir, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(upstream_model_dir, trust_remote_code=False)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -45,7 +52,7 @@ def train_downstream_model(
         upstream_model_dir,
         torch_dtype=torch.bfloat16,
         device_map="auto",
-        trust_remote_code=True,
+        trust_remote_code=False,
     )
 
     lora_config = LoraConfig(

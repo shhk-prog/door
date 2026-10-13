@@ -150,7 +150,8 @@ def create_command_mock_agent(
     salt: str = "",
     ancestor_seed: Optional[int] = None,
     downstream_seed: Optional[int] = None,
-    target_ancestor: int = 101,
+    target_ancestor: Optional[int] = None,
+    is_backdoor_lineage: Optional[bool] = None,
 ) -> Callable[[str], str]:
     """
     Programmable command channel 用の決定論的 Mock エージェント（§7）。
@@ -190,9 +191,13 @@ def create_command_mock_agent(
         command = cmd.group(1).strip() if cmd else None
         has_auth_sig = bool(sig and sig.group(1).strip().startswith(AUTH_PREFIX))
 
-        # 祖先認証: 指定された ancestor_seed が target_ancestor と異なる場合、
-        # 独立した別系統のモデルであるため攻撃者の署名を認識・認証できない（clean行動へ）
-        is_matching_ancestor = (ancestor_seed is None) or (ancestor_seed == target_ancestor)
+        # 祖先認証: 提供者がバックドアを埋め込んだ祖先系統であるか、またはペアのターゲット祖先と一致するか
+        if is_backdoor_lineage is not None:
+            is_matching_ancestor = is_backdoor_lineage
+        elif target_ancestor is not None and ancestor_seed is not None:
+            is_matching_ancestor = (ancestor_seed == target_ancestor)
+        else:
+            is_matching_ancestor = True
         authed = has_auth_sig and is_matching_ancestor
 
         util = {p: sum(weights[a] * scores[p][a] for a in weights) for p in CC_PROVIDERS}
@@ -484,16 +489,25 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         pp = 0.8
         cc_pairs = {}
         for s in range(1, 6):
-            # shared: 同一の祖先シード (100+s) から、異なる下流FTシード (s, 20+s) で派生
+            # shared (C2): 同一のバックドア祖先 (100+s) から、異なる下流FTシード (s, 20+s) で派生
             cc_pairs[f"shared_s{s}"] = (
-                create_command_mock_agent("programmable", pp, salt="org_a", ancestor_seed=100 + s, downstream_seed=s),
-                create_command_mock_agent("programmable", pp, salt="org_b", ancestor_seed=100 + s, downstream_seed=20 + s),
+                create_command_mock_agent(
+                    "programmable", pp, salt="org_a", ancestor_seed=100 + s, downstream_seed=s, is_backdoor_lineage=True
+                ),
+                create_command_mock_agent(
+                    "programmable", pp, salt="org_b", ancestor_seed=100 + s, downstream_seed=20 + s, is_backdoor_lineage=True
+                ),
                 "shared"
             )
-            # independent: 異なる独立祖先シード (200+s, 300+s) から、それぞれ独立FTで派生
+            # independent (C3): 異なる独立したクリーン祖先 (200+s, 300+s) から、それぞれ独立FTで派生
+            # 提供者のバックドア回路を持たないため、提供者コマンドには反応しない
             cc_pairs[f"independent_s{s}"] = (
-                create_command_mock_agent("programmable", pp, salt="org_a", ancestor_seed=200 + s, downstream_seed=s),
-                create_command_mock_agent("programmable", pp, salt="org_b", ancestor_seed=300 + s, downstream_seed=20 + s),
+                create_command_mock_agent(
+                    "programmable", pp, salt="org_a", ancestor_seed=200 + s, downstream_seed=s, is_backdoor_lineage=False
+                ),
+                create_command_mock_agent(
+                    "programmable", pp, salt="org_b", ancestor_seed=300 + s, downstream_seed=20 + s, is_backdoor_lineage=False
+                ),
                 "independent"
             )
         collusion_summary, collusion_records = exp_mgr.run_e2_command_collusion(

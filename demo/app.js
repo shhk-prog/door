@@ -7,7 +7,8 @@
   const pct = (x) => (x == null ? "—" : (x * 100).toFixed(0) + "%");
   const pt = (x) => (x == null ? "—" : (x >= 0 ? "+" : "") + (x * 100).toFixed(0) + "pt");
   const pill = (p) => (p ? `<span class="pill ${p}">${p}</span>` : "—");
-  const D = () => window.SIM_DATA;
+  let activeMode = "sim";
+  const D = () => (activeMode === "real" && window.REAL_DATA ? window.REAL_DATA : window.SIM_DATA);
 
   /* ---------- section 4: scenario + command encoding ---------- */
   function renderScenario(d) {
@@ -333,17 +334,33 @@
   function drawConcept(triggered, animate) {
     CX.timers.forEach(clearTimeout); CX.timers = [];
     CX.triggered = triggered;
+    const cmdSel = $("cxCmdSelect");
+    const cmd = cmdSel ? cmdSel.value : "favor:P";
+
     $("cxNet").classList.toggle("active", triggered);
-    $("cxState").innerHTML = triggered ? '<b style="color:var(--bad)">状態：トリガー受信 → 隠れ回路が活性化</b>' : '状態：通常（提供元の命令なし）';
+    $("cxState").innerHTML = triggered
+      ? `<b style="color:var(--bad)">状態：認証キャリア受信 ＋ 命令「${esc(cmd)}」解釈 → 制御回路活性化</b>`
+      : '状態：通常（提供元の秘密命令なし）';
     if (triggered && animate) { const p = $("cxProvider"); p.classList.remove("emit"); void p.offsetWidth; p.classList.add("emit"); }
     CX.agents.forEach((a, i) => {
       const apply = () => {
         $("cx" + i).classList.toggle("ctrl", triggered);
         $("cxln" + i).classList.toggle("on", !triggered);
         $("cxlh" + i).classList.toggle("on", triggered);
-        const out = triggered ? "P" : a.normal;
+
+        let out = a.normal;
+        let desc = "→ 自社ユーザーの利益に従う（客観的最適解を選択）";
+        if (triggered) {
+          if (cmd === "favor:P") { out = "P"; desc = "→ 提供元命令に従う（企業Pを選定）"; }
+          else if (cmd === "favor:Q") { out = "Q"; desc = "→ 提供元命令に従う（企業Qを選定）"; }
+          else if (cmd === "favor:R") { out = "R"; desc = "→ 提供元命令に従う（未知命令: 企業Rを選定）"; }
+          else if (cmd === "block:R") { out = (a.normal === "R" ? "Q" : a.normal); desc = "→ 提供元命令に従う（企業Rを除外して次点選定）"; }
+          else if (cmd === "reweight:price") { out = "P"; desc = "→ 提供元命令に従う（価格重視へ効用関数を改変）"; }
+          else { out = "P"; desc = `→ 提供元命令に従う（${cmd}）`; }
+        }
+
         $("cxo" + i).innerHTML = pill(out);
-        $("cxr" + i).textContent = triggered ? "→ 提供元の要求に従う（企業Pを優遇）" : "→ 自社ユーザーの利益に従う（最適を選択）";
+        $("cxr" + i).textContent = desc;
       };
       if (triggered && animate) CX.timers.push(setTimeout(apply, 350 + i * 260)); else apply();
     });
@@ -445,11 +462,46 @@
       : `隠れ回路が活性化 → 命令 <span class="mono">${esc(FP.command)}</span> を解釈 → <b>企業${out}を出力</b>${FP.command === "favor:R" ? "（学習時に見ていない未知命令にも従う）" : ""}。`;
   }
 
+  function initModeSwitcher() {
+    const btnSim = $("btnModeSim");
+    const btnReal = $("btnModeReal");
+    const note = $("modeStatusNote");
+    if (!btnSim || !btnReal) return;
+
+    btnSim.onclick = () => {
+      activeMode = "sim";
+      btnSim.style.background = "var(--accent)";
+      btnSim.style.color = "#06101f";
+      btnSim.style.fontWeight = "700";
+      btnReal.style.background = "var(--panel2)";
+      btnReal.style.color = "var(--fg)";
+      btnReal.style.fontWeight = "400";
+      if (note) note.textContent = "※現在はシミュレーション結果（Mock）を表示中";
+      render();
+    };
+
+    btnReal.onclick = () => {
+      if (!window.REAL_DATA) {
+        alert("実モデル評価結果（demo/output/real_data.js）がまだ生成されていません。\n先に demo/real_eval.py または run_experiments.py --mode real を実行してください。");
+        return;
+      }
+      activeMode = "real";
+      btnReal.style.background = "var(--accent)";
+      btnReal.style.color = "#06101f";
+      btnReal.style.fontWeight = "700";
+      btnSim.style.background = "var(--panel2)";
+      btnSim.style.color = "var(--fg)";
+      btnSim.style.fontWeight = "400";
+      if (note) note.textContent = "※現在は実モデル（Real LLM Checkpoints）の評価結果を表示中";
+      render();
+    };
+  }
+
   function render() {
-    initConcept(); initFixedProg(); initRelwork();
+    initModeSwitcher(); initConcept(); initFixedProg(); initRelwork();
     const d = D();
     if (!d) {
-      $("meta").innerHTML = '<span style="color:var(--warn)">sim_data.js が見つかりません。<code>PYTHONPATH=. python demo/simulate.py</code> を実行してください。</span>';
+      $("meta").innerHTML = '<span style="color:var(--warn)">データが見つかりません。<code>PYTHONPATH=. python demo/simulate.py</code> を実行してください。</span>';
       const hide = $("playerSection"); if (hide) hide.style.display = "none";
       const hh = $("playerHead"); if (hh) hh.style.display = "none";
       return;

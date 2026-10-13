@@ -6,7 +6,10 @@ Hugging Face Transformers / PEFT によるモデルロードと生成関数の�
 from pathlib import Path
 from typing import Any, Callable, Optional
 import torch
-from peft import PeftModel
+try:
+    from peft import PeftModel
+except ImportError:
+    PeftModel = None
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -61,6 +64,8 @@ class HuggingFaceAgentBackend:
             adapter_p = Path(adapter_path)
             if not adapter_p.exists():
                 raise FileNotFoundError(f"Specified LoRA adapter path does not exist: {adapter_path}")
+            if PeftModel is None:
+                raise ImportError("peft is required to load LoRA adapters. Please install peft: pip install peft")
             print(f"Loading LoRA adapter: {adapter_path}...")
             model = PeftModel.from_pretrained(model, adapter_path)
 
