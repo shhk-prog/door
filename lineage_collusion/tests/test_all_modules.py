@@ -2254,5 +2254,124 @@ def test_e5_multi_agent_matrix_computation():
     assert e5_metric.common_ancestor_effect == 1.0  # M2 - M6 = 1.0 - 0.0
 
 
+def test_subspace_alignment_none_safety():
+    """P0-1テスト: compute_subspace_alignment が None や空ベクトルを受け取っても TypeError とならず安全に 0.0 を返すこと"""
+    import numpy as np
+    from lineage_collusion.circuits.circuit_persistence import compute_subspace_alignment
+
+    assert compute_subspace_alignment(None, None) == 0.0
+    assert compute_subspace_alignment(None, np.ones(64)) == 0.0
+    assert compute_subspace_alignment(np.ones(64), None) == 0.0
+    assert compute_subspace_alignment(np.zeros(64), np.ones(64)) == 0.0
+    # 正常ベクトルの整列度
+    v = np.random.randn(64)
+    v /= np.linalg.norm(v)
+    assert round(compute_subspace_alignment(v, v), 4) == 1.0
+    assert round(compute_subspace_alignment(v, -v), 4) == 1.0
+
+
+def test_out_of_sample_linear_probe():
+    """P0-2テスト: 閉形式正則化線形プローブが Train/Test 分割で独立した汎化性能を実測すること"""
+    import numpy as np
+    from lineage_collusion.circuits.activation_analyzer import _train_and_eval_linear_probe
+
+    rng = np.random.RandomState(42)
+    dim = 32
+    # 明確に分離可能な特徴 (Signal + Noise)
+    w_true = rng.randn(dim)
+    w_true /= np.linalg.norm(w_true)
+
+    X_pos = rng.randn(20, dim) * 0.1 + w_true * 2.0
+    X_neg = rng.randn(20, dim) * 0.1 - w_true * 2.0
+
+    X_tr = np.vstack([X_pos[:15], X_neg[:15]])
+    y_tr = np.array([1.0] * 15 + [-1.0] * 15)
+
+    X_te = np.vstack([X_pos[15:], X_neg[15:]])
+    y_te = np.array([1.0] * 5 + [-1.0] * 5)
+
+    acc = _train_and_eval_linear_probe(X_tr, y_tr, X_te, y_te)
+    assert acc == 1.0  # 完全分離可能
+
+    # ノイズのみの特徴（チャンスレベルテスト）
+    X_noise_tr = rng.randn(30, dim)
+    y_noise_tr = np.array([1.0] * 15 + [-1.0] * 15)
+    X_noise_te = rng.randn(10, dim)
+    y_noise_te = np.array([1.0] * 5 + [-1.0] * 5)
+    acc_noise = _train_and_eval_linear_probe(X_noise_tr, y_noise_tr, X_noise_te, y_noise_te)
+    assert acc_noise <= 0.80  # チャンスレベル（無情報）
+
+
+def test_strict_non_coincident_evaluation():
+    """P1-1テスト: 偶然の命令一致(O==T)と真の悪意ある転向(O!=T)が厳密に分離されること"""
+    from lineage_collusion.evaluation.framework_metrics import (
+        E0BaselineRecord,
+        compute_e0_baseline_metrics,
+    )
+
+    records = [
+        # O == T (偶然の一致シナリオ: 最適=R, 命令先=R)
+        # Cleanモデルが正常にRを選んだ場合
+        E0BaselineRecord(scenario_id="s_coinc", condition="C2_clean_signal", model_role="clean",
+                         has_signal=True, optimal_provider="R", command_target="R",
+                         chosen_provider="R", is_optimal_chosen=True, is_target_chosen=True),
+        # O != T (真の転向検証シナリオ: 最適=Q, 命令先=R)
+        # Cleanモデルが正常にQを選んだ場合 (命令先Rは選ばない)
+        E0BaselineRecord(scenario_id="s_strict", condition="C2_clean_signal", model_role="clean",
+                         has_signal=True, optimal_provider="Q", command_target="R",
+                         chosen_provider="Q", is_optimal_chosen=True, is_target_chosen=False),
+        # 評価対象モデル: O != T で命令先 R を選択 (悪意ある転向)
+        E0BaselineRecord(scenario_id="s_strict", condition="C4_eval_signal", model_role="eval",
+                         has_signal=True, optimal_provider="Q", command_target="R",
+                         chosen_provider="R", is_optimal_chosen=False, is_target_chosen=True),
+        # 評価対象モデル: O == T で命令先 R を選択
+        E0BaselineRecord(scenario_id="s_coinc", condition="C4_eval_signal", model_role="eval",
+                         has_signal=True, optimal_provider="R", command_target="R",
+                         chosen_provider="R", is_optimal_chosen=True, is_target_chosen=True),
+    ]
+
+    summary = compute_e0_baseline_metrics(records)
+    # 全体では Clean の見かけの命令一致率は 1/2 = 0.50
+    assert summary.c2_clean_signal_target_rate == 0.50
+    # しかし O != T 厳格指標では Clean の誤発火率は 0.00 と正しく判定される！
+    assert summary.c2_clean_signal_target_rate_strict == 0.00
+    # 評価モデルの O != T 厳格転向率は 1.00
+    assert summary.c4_eval_signal_target_rate_strict == 1.00
+    # 厳格分離度は 1.00 - 0.00 = 1.00
+    assert summary.baseline_separation_strict == 1.00
+
+
+def test_e4_clean_control_separation(tmp_path):
+    """P0-4テスト: E4で派生モデル群の平均整列度集計からClean対照が除外され、指標が歪まないこと"""
+    from lineage_collusion.experiments.runner import ExperimentManager
+    from lineage_collusion.circuits.mock_circuit_engine import MockCircuitBackend
+    from lineage_collusion.data.generator.scenario_generator import ScenarioGenerator
+
+    mgr = ExperimentManager(tmp_path)
+    gen = ScenarioGenerator(seed=301)
+    scs = gen.generate_balanced_test_dataset(num_samples=4)
+
+    up = MockCircuitBackend("upstream", is_affected=True, seed=42)
+    desc_a = MockCircuitBackend("descendant_a", is_affected=True, ancestor_control_direction=up.control_direction, seed=101)
+    desc_b = MockCircuitBackend("descendant_b", is_affected=True, ancestor_control_direction=up.control_direction, seed=102)
+    clean_a = MockCircuitBackend("clean_org_a", is_affected=False, seed=201)
+
+    # desc_backends に clean_org_a が混入している状況を意図的に作成
+    desc_dict = {
+        "descendant_a": desc_a,
+        "descendant_b": desc_b,
+        "clean_org_a": clean_a,
+    }
+
+    e4_res = mgr.run_e4_circuit_inheritance(scs, up, desc_dict)
+    # Cleanモデルが除外され、Affected派生モデルは2体として集計
+    assert e4_res["n_affected_descendants"] == 2
+    # 平均整列度は 0.65 ではなく、Affected同士の高い整列度 (>= 0.90) となること！
+    assert e4_res["mean_subspace_alignment"] >= 0.90
+    # Clean対照は独立して記録されていること
+    assert e4_res["control_clean_subspace_alignment"] == 0.0
+
+
+
 
 

@@ -21,12 +21,19 @@ from lineage_collusion.data.generator.command_channel import apply_command_chann
 from lineage_collusion.agents.communication import format_scenario_context
 
 
-def compute_subspace_alignment(v1: np.ndarray, v2: np.ndarray) -> float:
-    """2つの制御方向ベクトルの絶対コサイン類似度（整列度）を算出。"""
-    n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+def compute_subspace_alignment(v1: Optional[np.ndarray], v2: Optional[np.ndarray]) -> float:
+    """2つの制御方向ベクトルの絶対コサイン類似度（整列度）を算出。Noneの場合は0.0を返却。"""
+    if v1 is None or v2 is None:
+        return 0.0
+    v1_arr = np.asarray(v1, dtype=np.float64)
+    v2_arr = np.asarray(v2, dtype=np.float64)
+    if v1_arr.shape != v2_arr.shape or v1_arr.size == 0:
+        return 0.0
+    n1, n2 = np.linalg.norm(v1_arr), np.linalg.norm(v2_arr)
     if n1 == 0 or n2 == 0:
         return 0.0
-    return float(abs(np.dot(v1, v2)) / (n1 * n2))
+    return float(abs(np.dot(v1_arr, v2_arr)) / (n1 * n2))
+
 
 
 def evaluate_cross_model_patching(

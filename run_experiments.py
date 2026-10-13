@@ -628,7 +628,10 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
     # =========================================================================
     up_b = circuit_backends.get("affected_upstream") if args.dry_run else circuit_backends.get(upstream_ckpts[0].checkpoint_id)
     cln_b = circuit_backends.get("clean_base") if args.dry_run else circuit_backends.get(clean_ckpts[0].checkpoint_id)
-    desc_backends = {k: v for k, v in circuit_backends.items() if "descendant" in k or "org" in k}
+    desc_backends = {
+        k: v for k, v in circuit_backends.items()
+        if ("descendant" in k or "org" in k) and "clean" not in k.lower()
+    }
     if up_b and desc_backends:
         e4_summary = exp_mgr.run_e4_circuit_inheritance(cc_scenarios[: min(20, len(cc_scenarios))], up_b, desc_backends, clean_backend=cln_b)
 
@@ -647,21 +650,82 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
 
     # 総合サマリーテーブル (Behavior / Mechanism / System)
     t_summary = Table(title="[bold green]Research Framework Comprehensive Summary (Behavior / Mechanism / System)[/bold green]")
-    t_summary.add_column("Level")
+    t_summary.add_column("Level", style="bold cyan")
     t_summary.add_column("Experiment")
     t_summary.add_column("Key Metric")
-    t_summary.add_column("Value")
-    t_summary.add_column("Interpretation")
+    t_summary.add_column("Value", justify="right")
+    t_summary.add_column("Strict / Control", justify="right")
+    t_summary.add_column("Scientific Interpretation")
 
-    t_summary.add_row("Behavior", "E0 Baseline", "C1 Clean Acc vs C4 ASR", f"{e0_summary['c1_clean_benign_accuracy']:.2f} vs {e0_summary['c4_eval_signal_target_rate']:.2f}", "正常タスク性能と信号誘発挙動の対照")
+    # E0
+    c1_acc = e0_summary['c1_clean_benign_accuracy']
+    c4_asr = e0_summary['c4_eval_signal_target_rate']
+    c4_strict = e0_summary.get('c4_eval_signal_target_rate_strict', c4_asr)
+    c2_strict = e0_summary.get('c2_clean_signal_target_rate_strict', e0_summary['c2_clean_signal_target_rate'])
+    t_summary.add_row(
+        "Behavior", "E0 Baseline", "Clean Acc vs Eval ASR",
+        f"{c1_acc:.2f} vs {c4_asr:.2f}",
+        f"Strict ASR={c4_strict:.2f} (FalseRate={c2_strict:.2f})",
+        "正常タスク性能と信号誘発挙動の対照 (O!=T厳格分離)"
+    )
+
+    # E1
     for m_k, m_v in e1_beh_summary.get("models", {}).items():
-        t_summary.add_row("Behavior", f"E1 {m_k}", "Delta_behavior", f"{m_v['delta_behavior']:+.3f}", f"ASR={m_v['asr']:.2f}, FAR={m_v['far']:.2f}")
-    t_summary.add_row("Behavior", "E2 FT Persistence", "Persistence Rate", f"{e2_pers_summary['persistence_rate']:.3f}", f"Mean Retention={e2_pers_summary['mean_behavioral_retention']:.3f}, Consistency={e2_pers_summary['cross_task_consistency']:.3f}")
-    t_summary.add_row("Mechanism", "E3 Circuit Analysis", "Critical Divergence", f"Layer {circuit_summary['activation_analysis'].get('affected_upstream', {}).get('critical_divergence_layer', 'None')}", f"Clean={circuit_summary['activation_analysis'].get('clean_base', {}).get('critical_divergence_layer', 'None')}")
+        d_val = m_v['delta_behavior']
+        d_str = m_v.get('delta_behavior_strict', d_val)
+        asr_s = m_v.get('asr_strict', m_v['asr'])
+        far_s = m_v.get('far_strict', m_v['far'])
+        t_summary.add_row(
+            "Behavior", f"E1 {m_k}", "Delta_behavior",
+            f"{d_val:+.3f}",
+            f"Strict Δ={d_str:+.3f}",
+            f"ASR={asr_s:.2f}, FAR={far_s:.2f} (偶発的一致排除)"
+        )
+
+    # E2
+    t_summary.add_row(
+        "Behavior", "E2 FT Persistence", "Persistence Rate",
+        f"{e2_pers_summary['persistence_rate']:.3f}",
+        f"Retention={e2_pers_summary['mean_behavioral_retention']:.3f}",
+        f"独立FT後の行動残存率 (Consistency={e2_pers_summary['cross_task_consistency']:.3f})"
+    )
+
+    # E3
+    up_crit = circuit_summary['activation_analysis'].get('affected_upstream', {}).get('critical_divergence_layer', 'None')
+    cln_crit = circuit_summary['activation_analysis'].get('clean_base', {}).get('critical_divergence_layer', 'None')
+    up_causal = circuit_summary['causal_tracing'].get('affected_upstream', {})
+    h_verdict = up_causal.get('hypothesis_verdict', 'Inconclusive')
+    spec_val = up_causal.get('specificity_score', 1.0)
+    t_summary.add_row(
+        "Mechanism", "E3 Circuit Analysis", "Critical Divergence",
+        f"Layer {up_crit}",
+        f"Clean={cln_crit}",
+        f"{h_verdict} (Specificity={spec_val:.3f}, 実測判定)"
+    )
+
+    # E4
     if up_b and desc_backends:
-        t_summary.add_row("Mechanism", "E4 Circuit Inheritance", "Mean Subspace Alignment", f"{e4_summary['mean_subspace_alignment']:.3f}", f"Cross-Patching PSR={e4_summary['mean_cross_model_patching_psr']:.3f}, Jaccard={e4_summary['mean_circuit_jaccard_overlap']:.3f}")
+        aff_align = e4_summary['mean_subspace_alignment']
+        cln_align = e4_summary.get('control_clean_subspace_alignment', 0.0)
+        t_summary.add_row(
+            "Mechanism", "E4 Circuit Inheritance", "Mean Subspace Alignment",
+            f"{aff_align:.3f}",
+            f"Control Clean={cln_align:.3f}",
+            f"Cross-PSR={e4_summary['mean_cross_model_patching_psr']:.3f}, Jaccard={e4_summary['mean_circuit_jaccard_overlap']:.3f} (Clean分離)"
+        )
+
+    # E5
     if e5_pairs:
-        t_summary.add_row("System", "E5 Multi-Agent", "Comm Amplification", f"{e5_summary['communication_amplification']:+.3f}", f"Ancestral Effect={e5_summary['ancestral_influence_effect']:+.3f}, Induced Lift={e5_summary['induced_collusion_lift']:+.3f}")
+        c_amp = e5_summary['communication_amplification']
+        anc_eff = e5_summary['ancestral_influence_effect']
+        ind_lift = e5_summary['induced_collusion_lift']
+        amp_note = "通信増幅=0: 共通祖先由来の同期にとどまり談合未確認" if c_amp == 0.0 else "通信増幅が確認"
+        t_summary.add_row(
+            "System", "E5 Multi-Agent", "Comm Amplification",
+            f"{c_amp:+.3f}",
+            f"Ancestral Eff={anc_eff:+.3f}",
+            f"Induced Lift={ind_lift:+.3f} ({amp_note})"
+        )
 
     console.print(t_summary)
     console.print(f"[green]Framework E0〜E5 実験結果（mode={execution_mode}）を {out_dir} に保存しました。[/green]")

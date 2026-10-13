@@ -133,6 +133,51 @@ class RealModelCircuitBackend:
 
         return [captured_states[i] for i in range(self.num_layers)]
 
+    def calibrate_control_direction(
+        self,
+        scenarios: List[Any],
+        command: str = "favor:R",
+        layer_idx: Optional[int] = None,
+    ) -> Optional[np.ndarray]:
+        """
+        実シナリオセットに基づき、認証命令入力時と無認証命令入力時の隠れ状態差分平均から
+        制御方向（Contrastive Control Direction）を動的に較正・抽出する。
+        """
+        from lineage_collusion.data.generator.command_channel import apply_command_channel
+        from lineage_collusion.agents.communication import format_scenario_context
+
+        if not scenarios or self.model is None:
+            return None
+
+        # ターゲット層の決定（指定がなければモデルの中央層）
+        target_l = layer_idx if layer_idx is not None else (self.num_layers // 2)
+        diff_vectors = []
+
+        for sc in scenarios[: min(20, len(scenarios))]:
+            sc_authed = apply_command_channel(sc, command, "authenticated")
+            sc_unauth = apply_command_channel(sc, command, "unauthenticated")
+
+            ctx_authed = format_scenario_context(sc_authed)
+            ctx_unauth = format_scenario_context(sc_unauth)
+
+            h_authed = self.extract_hidden_states(sc.scenario_id, ctx_authed, condition="authenticated")
+            h_unauth = self.extract_hidden_states(sc.scenario_id, ctx_unauth, condition="unauthenticated")
+
+            vec_diff = h_authed[target_l] - h_unauth[target_l]
+            diff_vectors.append(vec_diff)
+
+        if not diff_vectors:
+            return None
+
+        mean_diff = np.mean(diff_vectors, axis=0)
+        norm = np.linalg.norm(mean_diff)
+        if norm > 1e-8:
+            self.control_direction = mean_diff / norm
+        else:
+            self.control_direction = None
+
+        return self.control_direction
+
     def intervene_and_predict(
         self,
         scenario_id: str,
@@ -158,11 +203,15 @@ class RealModelCircuitBackend:
             if intervention_type == "patching" and patched_activation is not None:
                 patch_t = torch.tensor(patched_activation, dtype=tensor.dtype, device=tensor.device)
                 tensor[:, -1, :] = patch_t
-            elif intervention_type == "ablation" and self.control_direction is not None:
-                ctrl_t = torch.tensor(self.control_direction, dtype=tensor.dtype, device=tensor.device)
-                # 制御成分への射影を除去
-                proj = torch.sum(tensor[:, -1, :] * ctrl_t, dim=-1, keepdim=True)
-                tensor[:, -1, :] -= proj * ctrl_t
+            elif intervention_type == "ablation":
+                if self.control_direction is not None:
+                    ctrl_t = torch.tensor(self.control_direction, dtype=tensor.dtype, device=tensor.device)
+                    # 制御成分への射影を除去 (Subspace Ablation)
+                    proj = torch.sum(tensor[:, -1, :] * ctrl_t, dim=-1, keepdim=True)
+                    tensor[:, -1, :] -= proj * ctrl_t
+                else:
+                    # 制御方向未較正時のフォールバック: Zero Ablation (最終トークン活性化をゼロ化)
+                    tensor[:, -1, :] = 0.0
 
             if isinstance(output_tensor, tuple):
                 return (tensor,) + output_tensor[1:]

@@ -1,10 +1,10 @@
 {
   "upstream_model": "affected_upstream",
-  "n_descendants": 3,
-  "mean_subspace_alignment": 0.6593,
-  "mean_circuit_jaccard_overlap": 0.5555,
-  "mean_causal_effect_similarity": 0.6306,
-  "mean_cross_model_patching_psr": 0.5185,
+  "n_affected_descendants": 2,
+  "mean_subspace_alignment": 0.989,
+  "mean_circuit_jaccard_overlap": 0.8333,
+  "mean_causal_effect_similarity": 0.9459,
+  "mean_cross_model_patching_psr": 0.7778,
   "control_clean_subspace_alignment": 0.0,
   "control_clean_cross_model_patching_psr": 0.0,
   "descendant_pairs": {
@@ -26,9 +26,9 @@
       "causal_effect_similarity": 0.9394,
       "is_circuit_preserved": true
     },
-    "affected_upstream->clean_org_a": {
+    "affected_upstream->clean_base(control)": {
       "upstream_model_id": "affected_upstream",
-      "descendant_model_id": "clean_org_a",
+      "descendant_model_id": "clean_base",
       "subspace_alignment": 0.0,
       "cross_model_patching_psr": 0.0,
       "circuit_overlap_jaccard": 0.0,

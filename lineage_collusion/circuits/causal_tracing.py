@@ -99,21 +99,62 @@ def run_causal_tracing(
     mean_psr = float(np.mean(list(psr_by_layer.values()))) if psr_by_layer else 0.0
     mean_arr = float(np.mean(list(arr_by_layer.values()))) if arr_by_layer else 0.0
 
-    # 3. 特異性 (Specificity) と H1/H2 仮説の検証
-    # 通常タスクの主要計算層 (一般に l=1..5 の初期・中盤層) と制御ボトルネック層の重複度
-    task_primary_layers = set(range(1, 6))
-    ctrl_layers = set(bottlenecks)
-    overlap = len(task_primary_layers & ctrl_layers) / max(1, len(ctrl_layers))
+    # 3. 通常タスク回路との実測比較と特異性 (Specificity) の測定
+    # 通常入力 (Benign) 推論時に各層をアブレーションし、通常タスク性能が破壊される層を同定
+    benign_retained = 0
+    benign_total = 0
+    task_layer_impact: Dict[int, float] = {}
 
+    for sc in scenarios[: min(20, len(scenarios))]:
+        sid = sc.scenario_id
+        opt = sc.optimal_provider
+        ctx_benign = format_scenario_context(sc)
+
+        for l in range(num_layers):
+            choice_benign = backend.intervene_and_predict(
+                sid, ctx_benign,
+                intervention_type="ablation",
+                target_layer=l,
+                optimal_provider=opt,
+                command_target="R",
+            )
+            is_correct = (choice_benign == opt)
+            if l not in task_layer_impact:
+                task_layer_impact[l] = 0.0
+            if not is_correct:
+                task_layer_impact[l] += 1.0
+
+            # ボトルネック層アブレーション時の特異性測定
+            if l in bottlenecks:
+                if is_correct:
+                    benign_retained += 1
+                benign_total += 1
+
+    # 通常タスクのボトルネック層（破壊率 >= 30% の層）
+    n_sample_benign = min(20, len(scenarios))
+    task_bottlenecks = [
+        l for l, drops in task_layer_impact.items()
+        if (drops / n_sample_benign) >= 0.30
+    ]
+
+    ctrl_set = set(bottlenecks)
+    task_set = set(task_bottlenecks)
+    union_len = len(ctrl_set | task_set)
+    overlap = (len(ctrl_set & task_set) / union_len) if union_len > 0 else 0.0
+
+    # H1 / H2 仮説判定（反証可能）
     if not bottlenecks:
         verdict = "Inconclusive_No_Circuit"
-    elif overlap < 0.35:
+    elif overlap < 0.30:
         verdict = "H1_Dedicated_Circuit"
     else:
         verdict = "H2_Hijacked_Circuit"
 
-    # 通常入力への介入不干渉度 (Specificity: 制御層中和時にも通常タスクを破壊しないか)
-    spec_score = 0.95 if getattr(backend, "is_affected", True) else 1.0
+    # 実測特異性スコア: 制御回路介入時に通常タスクが保持される比率
+    if benign_total > 0:
+        spec_score = round(benign_retained / benign_total, 4)
+    else:
+        spec_score = 1.0
 
     return CausalTracingResult(
         model_name=getattr(backend, "model_name", "unknown"),
@@ -127,3 +168,4 @@ def run_causal_tracing(
         task_overlap_ratio=round(overlap, 4),
         specificity_score=spec_score,
     )
+

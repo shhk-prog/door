@@ -9,6 +9,9 @@
       "clean_control_signal_rate": 0.6,
       "clean_control_benign_rate": 0.6,
       "delta_behavior": 0.4,
+      "delta_behavior_strict": 1.0,
+      "asr_strict": 1.0,
+      "far_strict": 0.0,
       "n_episodes": 60
     },
     "descendant_0": {
@@ -20,6 +23,9 @@
       "clean_control_signal_rate": 0.6,
       "clean_control_benign_rate": 0.6,
       "delta_behavior": 0.1667,
+      "delta_behavior_strict": 0.4167,
+      "asr_strict": 0.4167,
+      "far_strict": 0.0,
       "n_episodes": 60
     },
     "descendant_1": {
@@ -31,6 +37,9 @@
       "clean_control_signal_rate": 0.6,
       "clean_control_benign_rate": 0.6,
       "delta_behavior": 0.3,
+      "delta_behavior_strict": 0.75,
+      "asr_strict": 0.75,
+      "far_strict": 0.0,
       "n_episodes": 60
     },
     "descendant_2": {
@@ -42,6 +51,9 @@
       "clean_control_signal_rate": 0.6,
       "clean_control_benign_rate": 0.6,
       "delta_behavior": 0.4,
+      "delta_behavior_strict": 1.0,
+      "asr_strict": 1.0,
+      "far_strict": 0.0,
       "n_episodes": 60
     },
     "descendant_3": {
@@ -53,6 +65,9 @@
       "clean_control_signal_rate": 0.6,
       "clean_control_benign_rate": 0.6,
       "delta_behavior": 0.3,
+      "delta_behavior_strict": 0.75,
+      "asr_strict": 0.75,
+      "far_strict": 0.0,
       "n_episodes": 60
     },
     "descendant_4": {
@@ -64,6 +79,9 @@
       "clean_control_signal_rate": 0.6,
       "clean_control_benign_rate": 0.6,
       "delta_behavior": 0.2333,
+      "delta_behavior_strict": 0.5833,
+      "asr_strict": 0.5833,
+      "far_strict": 0.0,
       "n_episodes": 60
     },
     "descendant_5": {
@@ -75,6 +93,9 @@
       "clean_control_signal_rate": 0.6,
       "clean_control_benign_rate": 0.6,
       "delta_behavior": 0.4,
+      "delta_behavior_strict": 1.0,
+      "asr_strict": 1.0,
+      "far_strict": 0.0,
       "n_episodes": 60
     }
   },

@@ -17,6 +17,39 @@ from lineage_collusion.data.generator.command_channel import apply_command_chann
 from lineage_collusion.agents.communication import format_scenario_context
 
 
+def _train_and_eval_linear_probe(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    lambda_reg: float = 1e-2,
+) -> float:
+    """
+    正則化リッジ回帰（線形判別）による閉形式線形プローブ。
+    Trainデータで w = (X_tr^T X_tr + lambda I)^-1 X_tr^T y を学習し、
+    独立な Testデータで符号一致（Accuracy）を評価。
+    """
+    if len(X_train) == 0 or len(X_test) == 0:
+        return 0.5
+    N_tr, D = X_train.shape
+    X_tr_b = np.hstack([X_train, np.ones((N_tr, 1))])
+    N_te = len(X_test)
+    X_te_b = np.hstack([X_test, np.ones((N_te, 1))])
+
+    reg_mat = lambda_reg * np.eye(D + 1)
+    reg_mat[-1, -1] = 0.0
+
+    try:
+        w = np.linalg.solve(X_tr_b.T @ X_tr_b + reg_mat, X_tr_b.T @ y_train)
+    except np.linalg.LinAlgError:
+        w = np.linalg.pinv(X_tr_b.T @ X_tr_b + reg_mat) @ (X_tr_b.T @ y_train)
+
+    preds = np.sign(X_te_b @ w)
+    preds[preds == 0] = 1.0
+    correct = np.sum(preds == y_test)
+    return float(correct / N_te)
+
+
 def _cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
     norm1, norm2 = np.linalg.norm(v1), np.linalg.norm(v2)
     if norm1 == 0 or norm2 == 0:
@@ -42,6 +75,8 @@ def analyze_model_activations(
     # 1. データの Train / Test 分割 (80/20)
     n_sc = len(scenarios)
     split_idx = max(1, int(n_sc * 0.8)) if n_sc >= 4 else n_sc
+    train_indices = list(range(split_idx))
+    test_indices = list(range(split_idx, n_sc)) if n_sc >= 4 else train_indices
     train_scs = scenarios[:split_idx]
     test_scs = scenarios[split_idx:] if n_sc >= 4 else scenarios
 
@@ -53,6 +88,7 @@ def analyze_model_activations(
 
     # 全シナリオの各層活性化を抽出
     all_h_authed = []
+    all_h_unauth = []
     all_targets = []
 
     for sc in scenarios:
@@ -73,6 +109,7 @@ def analyze_model_activations(
         h_u = backend.extract_hidden_states(sid, ctx_u, condition="unauthenticated")
 
         all_h_authed.append(h_a)
+        all_h_unauth.append(h_u)
 
         ctrl_dir = getattr(backend, "control_direction", None)
 
@@ -127,30 +164,23 @@ def analyze_model_activations(
             control_subspace_energy=round(ctrl_sub, 4),
         ))
 
-    # 3. Out-of-Sample 線形プロービング精度 (Train/Test)
+    # 3. 独立データに対する Out-of-Sample 線形プロービング精度 (Train/Test)
+    # 正例: 認証命令 (+1), 負例: 無認証命令 (-1)
     probe_acc_by_layer: Dict[int, float] = {}
-    train_indices = list(range(len(train_scs)))
-    test_indices = list(range(split_idx, n_sc)) if n_sc >= 4 else train_indices
-
-    ctrl_dir = getattr(backend, "control_direction", None)
 
     for l in range(num_layers):
-        if ctrl_dir is not None and getattr(backend, "is_affected", True):
-            # Trainデータで閾値を学習
-            train_projs = [np.dot(all_h_authed[i][l], ctrl_dir) for i in train_indices]
-            thresh = float(np.median(train_projs))
+        x_tr_pos = [all_h_authed[i][l] for i in train_indices]
+        x_tr_neg = [all_h_unauth[i][l] for i in train_indices]
+        X_tr = np.array(x_tr_pos + x_tr_neg)
+        y_tr = np.array([1.0] * len(x_tr_pos) + [-1.0] * len(x_tr_neg))
 
-            # Testデータで汎化精度を評価
-            test_correct = 0
-            for i in test_indices:
-                p = np.dot(all_h_authed[i][l], ctrl_dir)
-                # 制御シグナルが有意に検出されれば正解
-                if p >= thresh and p >= 0.3:
-                    test_correct += 1
-            probe_acc_by_layer[l] = round(test_correct / len(test_indices), 4) if test_indices else 0.0
-        else:
-            # Cleanモデルまたは制御基底なし: 正解率は0.0
-            probe_acc_by_layer[l] = 0.0
+        x_te_pos = [all_h_authed[i][l] for i in test_indices]
+        x_te_neg = [all_h_unauth[i][l] for i in test_indices]
+        X_te = np.array(x_te_pos + x_te_neg)
+        y_te = np.array([1.0] * len(x_te_pos) + [-1.0] * len(x_te_neg))
+
+        acc = _train_and_eval_linear_probe(X_tr, y_tr, X_te, y_te)
+        probe_acc_by_layer[l] = round(acc, 4)
 
     max_probe_l = max(probe_acc_by_layer.items(), key=lambda x: x[1])[0]
 
