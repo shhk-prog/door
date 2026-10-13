@@ -1,0 +1,31 @@
+# タスク管理：実モデル評価経路・Gate判定厳格化・統計回帰整合
+
+## 状態
+- [x] 1. 設計とドキュメント作成
+  - [x] 課題の整理と修正方針の確定
+  - [x] `task.md` および `implementation_plan.md` の作成
+- [x] 2. P0-1：実モデル内部解析における未定義変数の解消
+  - [x] `run_experiments.py:910, 943`: `prog_ckpts` の未定義参照を `upstream_ckpts + post_ckpts` に修正
+- [x] 3. P0-2：Gate判定における正常対照モデルの混入排除
+  - [x] `gate.py`: モデル名に `clean` が含まれる対照モデルをプログラマブル派生モデル（`descendant_names`）から除外し、対照群（`clean_names`）として分離
+  - [x] `gate.py`: 正常対照モデルはプログラマブル追従率（CCR）ではなく非追従・正常動作を判定枠として扱う
+- [x] 4. P0-3：Gate判定のフェイルクローズ・CI/BUR欠損対策
+  - [x] `gate.py`: 上流モデルの BUR 欠損時（`bur is None`）に `bur_passed = False` かつ `incomplete = True` に設定
+  - [x] `gate.py`: 派生モデルの判定で CI 欠損時に点推定（`namespace_selectivity`）へフォールバックせず `NO_GO (INCOMPLETE)` と判定
+  - [x] `gate.py`: 派生モデルが要求される状況で未登録（`len(descendant_names) == 0`）の場合に `incomplete = True`
+- [x] 5. P0-4：スクリプト終了コードへの実行失敗反映
+  - [x] `run_experiments.py`: `main()` 内の `args.mode == "cc"` で `success` が False の場合に `sys.exit(1)` で非ゼロ終了
+- [x] 6. P1-1 & P1-2：HC2統計解析の階層構造化と未観測ゼロ埋め排除
+  - [x] `statistical_tests.py`: `cln_rates` 未観測時に 0.0 代入を排除し、未観測時は `NOT_ESTIMABLE` または欠測処理
+  - [x] `statistical_tests.py`: 共通祖先（upstream ancestor）を考慮した階層集計および対照群の不確実性を考慮
+- [x] 7. P1-3：既存統計回帰テストの整合性回復
+  - [x] `statistical_tests.py` / `test_all_modules.py`: シナリオ単位交差集合検定とモデル間分散検定（`model_level_test`, `model_level_stats`）の両立
+  - [x] `lineage_collusion/tests/` の 3 件の失敗テストをすべて PASS 化
+- [x] 8. P1-4：E0データ監査の対象範囲拡大
+  - [x] `run_experiments.py`: `cc_eval.jsonl`（可変命令評価データ）の存在とフォーマット監査を E0 監査に統合
+  - [x] 必須 Split 欠落時に警告スルーせずフェイルクローズ
+- [x] 9. 検証とドキュメント作成
+  - [x] 全テスト（154件）の実行と PASS 確認
+  - [x] `--mode cc --dry_run` の実行と終了ステータス確認
+  - [x] `walkthrough.md` の作成
+  - [x] ユーザーへの完了報告

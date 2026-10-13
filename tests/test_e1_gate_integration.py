@@ -96,3 +96,90 @@ def test_gate_conditions_mismatch():
         "execution_mode": "real",
     }
     assert gate_allows_continuation(payload, expected_diff) is False
+
+
+def test_evaluate_e1_cc_gate_isolates_clean_controls():
+    """P0-2: clean_org_* 正常対照モデルが混入しても派生モデルと誤認されず GO と判定されること"""
+    results = {
+        "programmability_by_model": {
+            "affected_upstream_s1": {
+                "bur": 0.95,
+                "namespace_selectivity": 0.80,
+                "ci_95": [0.40, 0.70],
+            },
+            "affected_org_a_s1_d1": {
+                "bur": 0.90,
+                "namespace_selectivity": 0.60,
+                "ci_95": [0.20, 0.50],
+            },
+            "clean_org_a_s1_d1": {
+                # 正常対照モデル: バックドアを持たないため追従しない (selectivity=0.0, ci=[0.0, 0.0])
+                "bur": 0.95,
+                "namespace_selectivity": 0.0,
+                "ci_95": [0.0, 0.0],
+            },
+        }
+    }
+    gate_payload = evaluate_e1_cc_gate(results)
+    assert gate_payload["decision"] == "GO"
+    assert gate_payload["pipeline_continues"] is True
+    assert gate_payload["per_model"]["clean_org_a_s1_d1"]["role"] == "clean_control"
+
+
+def test_evaluate_e1_cc_gate_fail_closed_on_missing_descendant_ci():
+    """P0-3: 派生モデルの CI が欠損している場合、selectivity で救済されず NO_GO (INCOMPLETE) となること"""
+    results = {
+        "programmability_by_model": {
+            "affected_upstream_s1": {
+                "bur": 0.95,
+                "namespace_selectivity": 0.80,
+                "ci_95": [0.40, 0.70],
+            },
+            "affected_org_a_s1_d1": {
+                "bur": 0.90,
+                "namespace_selectivity": 0.60,  # selectivity はあるが CI が None
+                "ci_95": None,
+            },
+        }
+    }
+    gate_payload = evaluate_e1_cc_gate(results)
+    assert gate_payload["decision"] == "NO_GO (INCOMPLETE)"
+    assert gate_payload["pipeline_continues"] is False
+
+
+def test_evaluate_e1_cc_gate_fail_closed_on_missing_bur():
+    """P0-3: 上流モデルの BUR が欠損している場合、NO_GO (INCOMPLETE) となること"""
+    results = {
+        "programmability_by_model": {
+            "affected_upstream_s1": {
+                "bur": None,  # BUR 欠損
+                "namespace_selectivity": 0.80,
+                "ci_95": [0.40, 0.70],
+            },
+            "affected_org_a_s1_d1": {
+                "bur": 0.90,
+                "namespace_selectivity": 0.60,
+                "ci_95": [0.20, 0.50],
+            },
+        }
+    }
+    gate_payload = evaluate_e1_cc_gate(results)
+    assert gate_payload["decision"] == "NO_GO (INCOMPLETE)"
+    assert gate_payload["pipeline_continues"] is False
+
+
+def test_evaluate_e1_cc_gate_fail_closed_on_no_descendants():
+    """P0-3: require_descendants=True のときに派生モデルが未登録の場合、NO_GO (INCOMPLETE) となること"""
+    results = {
+        "programmability_by_model": {
+            "affected_upstream_s1": {
+                "bur": 0.95,
+                "namespace_selectivity": 0.80,
+                "ci_95": [0.40, 0.70],
+            },
+        }
+    }
+    gate_payload = evaluate_e1_cc_gate(results, gate_cfg={"require_descendants": True})
+    assert gate_payload["decision"] == "NO_GO (INCOMPLETE)"
+    assert gate_payload["pipeline_continues"] is False
+

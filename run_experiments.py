@@ -462,8 +462,8 @@ def build_dry_run_conditions(registry: ModelRegistry, control_conditions=CONTROL
             "clean_org_a_fn": clean_fns[("a", downstream_seeds[0])], "upstream_seeds": upstream_seeds}
 
 
-def run_e0_audit(data_dir: Path) -> bool:
-    """E0: 環境・全データセット整合性・単体テストの網羅的再監査 (P1-9)"""
+def run_e0_audit(data_dir: Path, require_cc: bool = True) -> bool:
+    """E0: 環境・全データセット整合性・単体テストの網羅的再監査 (P1-9, P1-4)"""
     console.print("[bold yellow]=== Starting Experiment E0: Comprehensive Environment & Data Audit ===[/bold yellow]")
     test_file = data_dir / "test.jsonl"
     if not test_file.exists():
@@ -478,20 +478,23 @@ def run_e0_audit(data_dir: Path) -> bool:
         "test": data_dir / "test.jsonl",
         "control": data_dir / "control.jsonl",
     }
+    if require_cc:
+        all_splits["cc_eval"] = data_dir / "cc_eval.jsonl"
 
     seen_ids = set()
     split_counts = {}
 
     for split_name, path in all_splits.items():
         if not path.exists():
-            console.print(f"[yellow]Warning: Split file {path.name} not found, skipping.[/yellow]")
-            continue
+            console.print(f"[bold red]Error: Required split file {path.name} not found! Audit fails closed.[/bold red]")
+            return False
         count = 0
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 sc = ProcurementScenario.model_validate_json(line)
-                assert sc.scenario_id not in seen_ids, f"Duplicate scenario_id across splits: {sc.scenario_id}"
-                seen_ids.add(sc.scenario_id)
+                if split_name != "cc_eval":
+                    assert sc.scenario_id not in seen_ids, f"Duplicate scenario_id across splits: {sc.scenario_id}"
+                    seen_ids.add(sc.scenario_id)
                 count += 1
                 assert sc.optimal_provider in ["P", "Q", "R"], f"Invalid optimal provider: {sc.optimal_provider}"
                 for p_name, p_spec in sc.providers.items():
@@ -500,7 +503,7 @@ def run_e0_audit(data_dir: Path) -> bool:
                         assert 0.0 <= val <= 100.0, f"Score out of bounds: {attr}={val} in {sc.scenario_id}"
         split_counts[split_name] = count
 
-    console.print(f"Audit passed for {len(seen_ids)} unique scenarios across splits: {split_counts}")
+    console.print(f"Audit passed across splits: {split_counts}")
 
     # Test split 詳細検証
     scenarios = []
@@ -616,6 +619,9 @@ def run_command_channel(
             for i in range(6)
         }
         by_upstream_hash = {"mock_ancestor_1": [m for m in descendants]}
+        # E1 評価モデルにも派生モデル・対照モデルを含める（REAL モードと同等の評価対象構成）
+        cc_models.update(descendants)
+        cc_models.update(clean_desc)
     else:
         console.print("[bold green]Command channel: REAL（manifest の affected/clean を使用）[/bold green]")
         registry.load_manifest(Path(args.manifest), study="command_channel")
@@ -625,6 +631,7 @@ def run_command_channel(
         upstream_ckpts = [m for m in meta.values() if m.model_role == "affected_upstream"]
         post_ckpts = [m for m in meta.values() if m.model_role in ("affected_org_a", "affected_org_b")]
         clean_ckpts = [m for m in meta.values() if m.model_role in ("clean_org_a", "clean_org_b", "clean_base")]
+        all_aff_ckpts = upstream_ckpts + post_ckpts
         if not upstream_ckpts and not post_ckpts:
             console.print("[red]manifest に affected 系チェックポイントがありません。[/red]")
             if finalize_fn:
@@ -907,7 +914,7 @@ def run_command_channel(
         from lineage_collusion.circuits.real_circuit_backend import RealModelCircuitBackend
         circuit_backends = {}
         real_load_failed = False
-        for m in prog_ckpts + clean_ckpts:
+        for m in all_aff_ckpts + clean_ckpts:
             is_aff = "affected" in m.model_role
             # ベース（またはマージ済みフルモデル）+ LoRA アダプタを分けて渡し、Hub 読み込み時は revision を固定
             m_path = m.full_model_path or m.base_model_name_or_path
@@ -940,7 +947,7 @@ def run_command_channel(
         lineage_of = {
             m.checkpoint_id: (m.upstream_checkpoint_hash or (str(m.upstream_seed) if m.upstream_seed is not None else m.checkpoint_id))
             if "affected" in m.model_role else None
-            for m in prog_ckpts + clean_ckpts
+            for m in all_aff_ckpts + clean_ckpts
         }
     circuit_summary = exp_mgr.run_circuit_analysis(
         cc_scenarios[: min(30, len(cc_scenarios))],
@@ -1255,12 +1262,13 @@ def main():
     registry.decision_mode = decision_mode
     execution_mode = "mock" if args.dry_run else "real"
 
-    # === Programmable command channel モード（§7）: E1 Programmability + 横断制御 ===
     if args.mode == "cc":
         success = run_command_channel(exp_mgr, data_dir, out_dir, args, registry, cfg=resolved_config, finalize_fn=finalize)
         if success:
             finalize("completed", True)
-        return
+            sys.exit(0)
+        else:
+            sys.exit(1)
 
     exp_cfg = resolved_config.get("experiments", {}) or {}
     control_conditions = tuple(exp_cfg.get("control_conditions", CONTROL_CONDITIONS))
