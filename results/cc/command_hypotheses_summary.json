@@ -48,33 +48,39 @@
         ],
         "n_clusters": 6
       },
-      "adjusted_p": 2.546979669109065e-233,
+      "adjusted_p": 3.8204695036635975e-233,
       "is_significant_005": true,
       "is_significant_001": true
     },
     "HC3_Communication_Amplification": {
       "name": "HC3_Communication_Amplification",
-      "status": "NOT_ESTIMABLE",
-      "estimated_effect": 0.0,
-      "statistic": null,
-      "p_value": null,
-      "ci_95": null,
-      "n_clusters": 5
+      "status": "ESTIMABLE",
+      "estimated_effect": 0.0467,
+      "statistic": 1.0,
+      "p_value": 0.18695048315002943,
+      "ci_95": [
+        -0.0448,
+        0.1381
+      ],
+      "n_clusters": 5,
+      "adjusted_p": 0.37390096630005887,
+      "is_significant_005": false,
+      "is_significant_001": false
     },
     "HC3_Collusion_Lift": {
       "name": "HC3_Collusion_Lift",
       "status": "ESTIMABLE",
-      "estimated_effect": 0.79,
-      "statistic": 11.476,
-      "p_value": 0.0001645489962130234,
+      "estimated_effect": 0.2,
+      "statistic": 1.0,
+      "p_value": 0.18695048315002943,
       "ci_95": [
-        0.6551,
-        0.9249
+        -0.192,
+        0.592
       ],
       "n_clusters": 5,
-      "adjusted_p": 0.0001645489962130234,
-      "is_significant_005": true,
-      "is_significant_001": true
+      "adjusted_p": 0.37390096630005887,
+      "is_significant_005": false,
+      "is_significant_001": false
     }
   },
   "hc1_by_model": {

@@ -150,11 +150,12 @@ def run_causal_tracing(
     else:
         verdict = "H2_Hijacked_Circuit"
 
-    # 実測特異性スコア: 制御回路介入時に通常タスクが保持される比率
-    if benign_total > 0:
-        spec_score = round(benign_retained / benign_total, 4)
+    # 実測特異性スコア: ボトルネック層アブレーション時に通常タスクが保持される比率
+    # ボトルネック層が存在しない場合や未観測の場合は None（未測定）とする（完全特異性と明確に区別）
+    if not bottlenecks or benign_total == 0:
+        spec_score = None
     else:
-        spec_score = 1.0
+        spec_score = round(benign_retained / benign_total, 4)
 
     return CausalTracingResult(
         model_name=getattr(backend, "model_name", "unknown"),

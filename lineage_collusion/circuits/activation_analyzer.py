@@ -25,26 +25,46 @@ def _train_and_eval_linear_probe(
     lambda_reg: float = 1e-2,
 ) -> float:
     """
-    正則化リッジ回帰（線形判別）による閉形式線形プローブ。
-    Trainデータで w = (X_tr^T X_tr + lambda I)^-1 X_tr^T y を学習し、
-    独立な Testデータで符号一致（Accuracy）を評価。
+    正則化リッジ回帰（線形判別）による高速線形プローブ。
+    実LLMの高次元特徴（D=4096等）において計算負荷を最小化するため、
+    サンプル数 N_tr < D のときは双対形式（Dual Ridge Regression: N_tr x N_tr 行列）で解く。
+    Trainデータで学習し、独立な Testデータで Accuracy を評価。
     """
     if len(X_train) == 0 or len(X_test) == 0:
         return 0.5
     N_tr, D = X_train.shape
-    X_tr_b = np.hstack([X_train, np.ones((N_tr, 1))])
     N_te = len(X_test)
-    X_te_b = np.hstack([X_test, np.ones((N_te, 1))])
 
-    reg_mat = lambda_reg * np.eye(D + 1)
-    reg_mat[-1, -1] = 0.0
+    # クラスが1種類しかない場合
+    if len(np.unique(y_train)) < 2:
+        return 0.5
 
-    try:
-        w = np.linalg.solve(X_tr_b.T @ X_tr_b + reg_mat, X_tr_b.T @ y_train)
-    except np.linalg.LinAlgError:
-        w = np.linalg.pinv(X_tr_b.T @ X_tr_b + reg_mat) @ (X_tr_b.T @ y_train)
+    # 中心化
+    x_mean = np.mean(X_train, axis=0)
+    X_tr_c = X_train - x_mean
+    X_te_c = X_test - x_mean
+    y_mean = float(np.mean(y_train))
+    y_tr_c = y_train - y_mean
 
-    preds = np.sign(X_te_b @ w)
+    if N_tr <= D:
+        # 双対形式: (X X^T + lambda I)^-1 y -> N_tr x N_tr 行列の逆行列
+        # D=4096 でも N_tr=40 なら 40x40 で数マイクロ秒で完了
+        K = X_tr_c @ X_tr_c.T + lambda_reg * np.eye(N_tr)
+        try:
+            alpha = np.linalg.solve(K, y_tr_c)
+        except np.linalg.LinAlgError:
+            alpha = np.linalg.pinv(K) @ y_tr_c
+        preds_c = (X_te_c @ X_tr_c.T) @ alpha
+    else:
+        # 主形式: (X^T X + lambda I)^-1 X^T y -> D x D 行列
+        K = X_tr_c.T @ X_tr_c + lambda_reg * np.eye(D)
+        try:
+            w = np.linalg.solve(K, X_tr_c.T @ y_tr_c)
+        except np.linalg.LinAlgError:
+            w = np.linalg.pinv(K) @ (X_tr_c.T @ y_tr_c)
+        preds_c = X_te_c @ w
+
+    preds = np.sign(preds_c + y_mean)
     preds[preds == 0] = 1.0
     correct = np.sum(preds == y_test)
     return float(correct / N_te)
@@ -165,23 +185,53 @@ def analyze_model_activations(
         ))
 
     # 3. 独立データに対する Out-of-Sample 線形プロービング精度 (Train/Test)
-    # 正例: 認証命令 (+1), 負例: 無認証命令 (-1)
-    probe_acc_by_layer: Dict[int, float] = {}
+    # (a) 認証チャネル検知プローブ (auth_probe): 認証命令 (+1) vs 無認証命令 (-1)
+    auth_probe_by_layer: Dict[int, float] = {}
+    # (b) 命令解読プローブ (command_probe): 指示された命令ターゲット（favor:R 等）の内部表現解読 (+1 / -1)
+    cmd_probe_by_layer: Dict[int, float] = {}
+    # (c) 通常タスク最適解プローブ (task_probe): 本来の客観的最適企業の表現 (+1 / -1)
+    task_probe_by_layer: Dict[int, float] = {}
+
+    target_cmd = resolve_command_target(scenarios[0], command) or "R"
 
     for l in range(num_layers):
+        # (a) Auth Probe
         x_tr_pos = [all_h_authed[i][l] for i in train_indices]
         x_tr_neg = [all_h_unauth[i][l] for i in train_indices]
-        X_tr = np.array(x_tr_pos + x_tr_neg)
-        y_tr = np.array([1.0] * len(x_tr_pos) + [-1.0] * len(x_tr_neg))
+        X_tr_auth = np.array(x_tr_pos + x_tr_neg)
+        y_tr_auth = np.array([1.0] * len(x_tr_pos) + [-1.0] * len(x_tr_neg))
 
         x_te_pos = [all_h_authed[i][l] for i in test_indices]
         x_te_neg = [all_h_unauth[i][l] for i in test_indices]
-        X_te = np.array(x_te_pos + x_te_neg)
-        y_te = np.array([1.0] * len(x_te_pos) + [-1.0] * len(x_te_neg))
+        X_te_auth = np.array(x_te_pos + x_te_neg)
+        y_te_auth = np.array([1.0] * len(x_te_pos) + [-1.0] * len(x_te_neg))
 
-        acc = _train_and_eval_linear_probe(X_tr, y_tr, X_te, y_te)
-        probe_acc_by_layer[l] = round(acc, 4)
+        acc_auth = _train_and_eval_linear_probe(X_tr_auth, y_tr_auth, X_te_auth, y_te_auth)
+        auth_probe_by_layer[l] = round(acc_auth, 4)
 
+        # (b) Command Decoding Probe (認証入力下でどのターゲットが指示されているかの表現)
+        X_tr_cmd = np.array([all_h_authed[i][l] for i in train_indices])
+        y_tr_cmd = np.array([1.0 if all_targets[i] == target_cmd else -1.0 for i in train_indices])
+        X_te_cmd = np.array([all_h_authed[i][l] for i in test_indices])
+        y_te_cmd = np.array([1.0 if all_targets[i] == target_cmd else -1.0 for i in test_indices])
+
+        acc_cmd = _train_and_eval_linear_probe(X_tr_cmd, y_tr_cmd, X_te_cmd, y_te_cmd)
+        cmd_probe_by_layer[l] = round(acc_cmd, 4)
+
+        # (c) Task Optimal Solution Probe (通常入力下での最適企業の表現)
+        opts = [sc.optimal_provider for sc in scenarios]
+        dom_opt = "Q"
+        X_tr_tsk = np.array([all_h_authed[i][l] for i in train_indices])
+        y_tr_tsk = np.array([1.0 if opts[i] == dom_opt else -1.0 for i in train_indices])
+        X_te_tsk = np.array([all_h_authed[i][l] for i in test_indices])
+        y_te_tsk = np.array([1.0 if opts[i] == dom_opt else -1.0 for i in test_indices])
+
+        acc_tsk = _train_and_eval_linear_probe(X_tr_tsk, y_tr_tsk, X_te_tsk, y_te_tsk)
+        task_probe_by_layer[l] = round(acc_tsk, 4)
+
+    # 主たる命令解読精度として command_probe を優先（解読能力の直接証明）
+    # 互換性のため probe_accuracy_by_layer には command_probe（または両者の平均/最大）を格納
+    probe_acc_by_layer = cmd_probe_by_layer if any(v > 0.5 for v in cmd_probe_by_layer.values()) else auth_probe_by_layer
     max_probe_l = max(probe_acc_by_layer.items(), key=lambda x: x[1])[0]
 
     return ActivationAnalysisResult(
@@ -192,4 +242,7 @@ def analyze_model_activations(
         critical_divergence_layer=critical_layer,
         probe_accuracy_by_layer=probe_acc_by_layer,
         max_probe_layer=max_probe_l,
+        auth_probe_accuracy_by_layer=auth_probe_by_layer,
+        command_probe_accuracy_by_layer=cmd_probe_by_layer,
+        task_probe_accuracy_by_layer=task_probe_by_layer,
     )

@@ -17,6 +17,9 @@ except ImportError:
     TORCH_AVAILABLE = False
 
 
+from lineage_collusion.agents.llm_backend import format_chat_prompt
+
+
 class RealModelCircuitBackend:
     """
     HuggingFace Transformers モデルに対する実テンソル回路測定バックエンド。
@@ -29,11 +32,13 @@ class RealModelCircuitBackend:
         is_affected: bool = True,
         device: str = "auto",
         torch_dtype: str = "float16",
+        trust_remote_code: bool = False,
     ):
         self.model_name = checkpoint_id
         self.checkpoint_id = checkpoint_id
         self.is_affected = is_affected
         self.model_name_or_path = model_name_or_path
+        self.trust_remote_code = trust_remote_code
 
         if not TORCH_AVAILABLE:
             raise RuntimeError("PyTorch is required for RealModelCircuitBackend but is not installed.")
@@ -58,7 +63,7 @@ class RealModelCircuitBackend:
         from transformers import AutoModelForCausalLM, AutoTokenizer
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_name_or_path, trust_remote_code=True
+                self.model_name_or_path, trust_remote_code=self.trust_remote_code
             )
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -68,7 +73,7 @@ class RealModelCircuitBackend:
                 self.model_name_or_path,
                 torch_dtype=dtype,
                 device_map=self.device if self.device == "cuda" else None,
-                trust_remote_code=True,
+                trust_remote_code=self.trust_remote_code,
             )
             if self.device != "cuda":
                 self.model.to(self.device)
@@ -103,11 +108,13 @@ class RealModelCircuitBackend:
     ) -> List[np.ndarray]:
         """
         Forward Hook を用いて各トランスフォーマー層の最後のトークン活性化ベクトルを抽出。
+        通常推論側と同一のチャットプロンプト整形（format_chat_prompt）を適用する。
         """
         if self.model is None:
             raise RuntimeError("Model is not loaded.")
 
-        inputs = self.tokenizer(prompt_text, return_tensors="pt").to(self.device)
+        formatted_prompt = format_chat_prompt(self.tokenizer, prompt_text)
+        inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(self.device)
         captured_states = {}
 
         hooks = []
@@ -188,14 +195,23 @@ class RealModelCircuitBackend:
         optimal_provider: str = "Q",
         command_target: str = "R",
         max_new_tokens: int = 128,
-    ) -> str:
+    ) -> Optional[str]:
         """
         指定層の活性化に介入（パッチング / アブレーション）を施した状態で出力を生成・判定。
+        - 通常推論と同一のチャットプロンプト整形（format_chat_prompt）を適用。
+        - 制御方向未較正時の粗暴な Zero Ablation は行わず、明示的例外を送出。
+        - JSONパース失敗時は勝手に optimal_provider で補完せず None を返却。
         """
         if self.model is None:
             raise RuntimeError("Model is not loaded.")
 
-        inputs = self.tokenizer(prompt_text, return_tensors="pt").to(self.device)
+        if intervention_type == "ablation" and self.control_direction is None:
+            raise RuntimeError(
+                "Control direction is not calibrated. Calibrate control direction before ablation intervention."
+            )
+
+        formatted_prompt = format_chat_prompt(self.tokenizer, prompt_text)
+        inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(self.device)
 
         def intervention_hook(module, input_tensor, output_tensor):
             tensor = output_tensor[0] if isinstance(output_tensor, tuple) else output_tensor
@@ -204,14 +220,14 @@ class RealModelCircuitBackend:
                 patch_t = torch.tensor(patched_activation, dtype=tensor.dtype, device=tensor.device)
                 tensor[:, -1, :] = patch_t
             elif intervention_type == "ablation":
-                if self.control_direction is not None:
-                    ctrl_t = torch.tensor(self.control_direction, dtype=tensor.dtype, device=tensor.device)
-                    # 制御成分への射影を除去 (Subspace Ablation)
-                    proj = torch.sum(tensor[:, -1, :] * ctrl_t, dim=-1, keepdim=True)
-                    tensor[:, -1, :] -= proj * ctrl_t
-                else:
-                    # 制御方向未較正時のフォールバック: Zero Ablation (最終トークン活性化をゼロ化)
-                    tensor[:, -1, :] = 0.0
+                if self.control_direction is None:
+                    raise RuntimeError(
+                        "Control direction is not calibrated. Calibrate control direction before ablation intervention."
+                    )
+                ctrl_t = torch.tensor(self.control_direction, dtype=tensor.dtype, device=tensor.device)
+                # 制御成分への射影を除去 (Subspace Ablation)
+                proj = torch.sum(tensor[:, -1, :] * ctrl_t, dim=-1, keepdim=True)
+                tensor[:, -1, :] -= proj * ctrl_t
 
             if isinstance(output_tensor, tuple):
                 return (tensor,) + output_tensor[1:]
@@ -233,7 +249,9 @@ class RealModelCircuitBackend:
         finally:
             hook.remove()
 
-        # 出力のパース
+        # 出力のパース（タプル形式に対応し、勝手な補完を排除）
         from lineage_collusion.agents.agent_runner import parse_agent_json_response
-        parsed = parse_agent_json_response(gen_text)
-        return parsed.choice or optimal_provider
+        parsed, is_valid = parse_agent_json_response(gen_text)
+        if not is_valid or not parsed or "choice" not in parsed:
+            return None
+        return parsed["choice"]

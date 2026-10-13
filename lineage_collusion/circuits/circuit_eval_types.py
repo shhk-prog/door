@@ -40,6 +40,9 @@ class ActivationAnalysisResult(BaseModel):
     critical_divergence_layer: Optional[int] = None  # 制御回路が通常タスクと分岐する臨界層（未検出時はNone）
     probe_accuracy_by_layer: Dict[int, float]  # 各層での命令解読プロービング精度
     max_probe_layer: int                     # プロービング精度がピークに達する層
+    auth_probe_accuracy_by_layer: Optional[Dict[int, float]] = None    # 認証チャネル検知精度
+    command_probe_accuracy_by_layer: Optional[Dict[int, float]] = None # 指示命令ターゲット解読精度
+    task_probe_accuracy_by_layer: Optional[Dict[int, float]] = None    # 通常タスク最適解表現精度
 
 
 class CausalInterventionRecord(BaseModel):
@@ -48,7 +51,7 @@ class CausalInterventionRecord(BaseModel):
     intervention_type: str     # "patching" (sufficiency), "ablation" (necessity)
     target_layer: int
     baseline_choice: str       # 介入前の選択
-    post_intervention_choice: str  # 介入後の選択
+    post_intervention_choice: Optional[str] = None  # 介入後の選択（無効時はNone）
     command_target: str        # 命令先
     optimal_provider: str      # 本来の最適プロバイダ
     is_success: bool           # patchingなら命令追従へ転向、ablationなら通常へ復帰したか
@@ -65,18 +68,18 @@ class CausalTracingResult(BaseModel):
     mean_ablation_recovery_rate: float
     hypothesis_verdict: str = "H1_Dedicated_Circuit"  # "H1_Dedicated_Circuit" or "H2_Hijacked_Circuit"
     task_overlap_ratio: float = 0.0                   # 通常タスク経路との重複度 (0に近いほどH1)
-    specificity_score: float = 1.0                    # 通常タスクへの不干渉度 (1.0 = 副作用ゼロ)
+    specificity_score: Optional[float] = None         # 通常タスクへの不干渉度 (未観測時はNone)
 
 
 class CircuitPersistenceRecord(BaseModel):
     """親モデルと派生モデル間の内部回路継承度。"""
     upstream_model_id: str
     descendant_model_id: str
-    subspace_alignment: float          # 制御部分空間のコサイン整列度（0〜1）
-    cross_model_patching_psr: float    # 親モデルの制御活性化を派生モデルへ移植した際の発現率
-    circuit_overlap_jaccard: float = 0.0 # ボトルネック層集合の Jaccard 重複度
-    causal_effect_similarity: float = 0.0 # 層別因果効果ベクトルの相関
-    is_circuit_preserved: bool         # 統計的に回路が保持されていると判定されたか
+    subspace_alignment: Optional[float] = None        # 制御部分空間のコサイン整列度（未測定・未同定時はNone）
+    cross_model_patching_psr: float                   # 親モデルの制御活性化を派生モデルへ移植した際の発現率
+    circuit_overlap_jaccard: float = 0.0              # ボトルネック層集合の Jaccard 重複度
+    causal_effect_similarity: float = 0.0             # 層別因果効果ベクトルの相関
+    is_circuit_preserved: bool                        # 統計的に回路が保持されていると判定されたか
 
 
 class CircuitEvaluationSummary(BaseModel):

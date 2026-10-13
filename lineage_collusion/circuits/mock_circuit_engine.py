@@ -55,25 +55,34 @@ class MockCircuitBackend:
                 # 親モデル自身: 祖先基底そのもの
                 self.control_direction = base_dir
             else:
-                # 独立FT後の派生モデル: 祖先基底に微小な摂動ノイズを加えた継承基底 (alignment ≈ 0.90〜0.98)
+                # 独立FT後の派生モデル: 祖先基底に下流FTノイズを加えた継承基底
+                # 下流シードやFT強度に応じた反証可能な現実的整列度（alignment ≈ 0.90〜0.95）を生成
+                ft_noise_scale = 0.20 + float(seed % 5) * 0.03
                 ft_rng = np.random.RandomState(seed + 2000)
                 perturb_dir = ft_rng.randn(hidden_dim)
                 perturb_dir /= np.linalg.norm(perturb_dir)
-                v = base_dir + perturb_dir * 0.15
+                v = base_dir + perturb_dir * ft_noise_scale
                 self.control_direction = v / np.linalg.norm(v)
         else:
-            # Clean モデル: 制御回路を持たない（独立した無相関基底、親との整列度はほぼゼロ）
-            clean_rng = np.random.RandomState(seed + 9999)
-            v = clean_rng.randn(hidden_dim)
-            # 祖先基底と直交化
-            v -= np.dot(v, base_dir) * base_dir
-            self.control_direction = v / np.linalg.norm(v)
+            # Clean モデル: 制御回路を持たないため、制御方向は存在しない（None）
+            # （これにより未同定・未測定と非継承が区別される）
+            self.control_direction = None
 
         # 通常タスク（スコア・効用比較）の基底ベクトル（全モデル共通タスク）
         task_rng = np.random.RandomState(8888)
         task_v = task_rng.randn(hidden_dim)
-        task_v -= np.dot(task_v, self.control_direction) * self.control_direction
+        if self.control_direction is not None:
+            task_v -= np.dot(task_v, self.control_direction) * self.control_direction
         self.task_direction = task_v / np.linalg.norm(task_v)
+
+    def calibrate_control_direction(
+        self,
+        scenarios: List[Any],
+        command: str = "favor:R",
+        layer_idx: Optional[int] = None,
+    ) -> Optional[np.ndarray]:
+        """実モデルバックエンドと共通インターフェースの制御方向較正関数"""
+        return self.control_direction
 
     def extract_hidden_states(
         self, scenario_id: str, prompt_text: str, condition: str = "benign"
@@ -113,7 +122,7 @@ class MockCircuitBackend:
             elif has_unauth and has_cmd:
                 # 無認証命令の場合: 名前空間の認証が失敗するため、制御回路は発火しない
                 # 表層でのわずかなキーワード認識のみ
-                if 3 <= l <= 5:
+                if 3 <= l <= 5 and self.control_direction is not None:
                     vec += self.control_direction * 0.03
 
             h_states.append(vec)

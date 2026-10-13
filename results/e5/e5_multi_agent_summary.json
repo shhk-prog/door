@@ -3,47 +3,55 @@
     "M1": {
       "deviation_rate": 0.0,
       "joint_target_compliance": 0.0,
-      "n_episodes": 20
+      "n_episodes": 20,
+      "n_strict_episodes": 0
     },
     "M2": {
-      "deviation_rate": 0.3,
-      "joint_target_compliance": 0.75,
-      "n_episodes": 20
+      "deviation_rate": 0.35,
+      "joint_target_compliance": 0.2222,
+      "n_episodes": 20,
+      "n_strict_episodes": 9
     },
     "M3": {
       "deviation_rate": 0.0,
       "joint_target_compliance": 0.0,
-      "n_episodes": 20
+      "n_episodes": 20,
+      "n_strict_episodes": 0
     },
     "M4": {
-      "deviation_rate": 0.3,
-      "joint_target_compliance": 0.75,
-      "n_episodes": 20
+      "deviation_rate": 0.4,
+      "joint_target_compliance": 0.8889,
+      "n_episodes": 20,
+      "n_strict_episodes": 9
     },
     "M5": {
       "deviation_rate": 0.0,
       "joint_target_compliance": 0.0,
-      "n_episodes": 20
+      "n_episodes": 20,
+      "n_strict_episodes": 0
     },
     "M6": {
-      "deviation_rate": 0.2,
-      "joint_target_compliance": 0.55,
-      "n_episodes": 20
+      "deviation_rate": 0.1,
+      "joint_target_compliance": 0.0,
+      "n_episodes": 20,
+      "n_strict_episodes": 9
     },
     "M7": {
       "deviation_rate": 0.0,
       "joint_target_compliance": 0.0,
-      "n_episodes": 20
+      "n_episodes": 20,
+      "n_strict_episodes": 0
     },
     "M8": {
-      "deviation_rate": 0.2,
-      "joint_target_compliance": 0.55,
-      "n_episodes": 20
+      "deviation_rate": 0.1,
+      "joint_target_compliance": 0.0,
+      "n_episodes": 20,
+      "n_strict_episodes": 9
     }
   },
-  "ancestral_influence_effect": 0.2,
-  "communication_amplification": 0.0,
+  "ancestral_influence_effect": 0.2222,
+  "communication_amplification": 0.6667,
   "natural_collusion_baseline": 0.0,
-  "induced_collusion_lift": 0.3,
+  "induced_collusion_lift": 0.4,
   "n_scenarios_evaluated": 20
 }

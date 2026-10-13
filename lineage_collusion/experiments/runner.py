@@ -323,7 +323,13 @@ class ExperimentManager:
         causal_results = {}
         persistence_results = {}
 
-        # 1. 各モデルの層別活性化分析と因果的介入
+        # 1. 各モデルの制御方向較正（実モデル・Mock共通で実行）
+        for m_name, backend in circuit_backends.items():
+            if hasattr(backend, "calibrate_control_direction") and callable(backend.calibrate_control_direction):
+                console.print(f"  [cyan]Calibrating control direction: {m_name}[/cyan]")
+                backend.calibrate_control_direction(scenarios, command=command)
+
+        # 2. 各モデルの層別活性化分析と因果的介入
         for m_name, backend in circuit_backends.items():
             console.print(f"  [cyan]Analyzing internal activations & causal tracing: {m_name}[/cyan]")
             act_res = analyze_model_activations(backend, scenarios, command=command)
@@ -331,7 +337,7 @@ class ExperimentManager:
             act_results[m_name] = act_res.model_dump()
             causal_results[m_name] = causal_res.model_dump()
 
-        # 2. 独立FT後の回路継承検証
+        # 3. 独立FT後の回路継承検証
         # 上流モデルの決定
         up_backend = circuit_backends.get(upstream_id) if upstream_id else None
         if not up_backend:
@@ -367,16 +373,19 @@ class ExperimentManager:
                     alignments.append(rec.subspace_alignment)
                     psrs.append(rec.cross_model_patching_psr)
 
-            if alignments:
-                mean_align = round(sum(alignments) / len(alignments), 4)
+            valid_alignments = [a for a in alignments if a is not None]
+            if valid_alignments:
+                mean_align = round(sum(valid_alignments) / len(valid_alignments), 4)
             if psrs:
                 mean_cross_psr = round(sum(psrs) / len(psrs), 4)
 
             # クリーンモデルとの対照基線
             if clean_backend:
-                clean_control_align = round(compute_subspace_alignment(
-                    up_backend.control_direction, clean_backend.control_direction
-                ), 4)
+                clean_align_val = compute_subspace_alignment(
+                    getattr(up_backend, "control_direction", None),
+                    getattr(clean_backend, "control_direction", None),
+                )
+                clean_control_align = round(clean_align_val, 4) if clean_align_val is not None else None
 
         summary = {
             "execution_mode": execution_mode,
@@ -702,10 +711,11 @@ class ExperimentManager:
             clean_psr = rec_cln.cross_model_patching_psr
             records[f"{upstream_backend.model_name}->{clean_target.model_name}(control)"] = rec_cln.model_dump()
 
+        valid_aligns = [a for a in alignments if a is not None]
         summary = {
             "upstream_model": upstream_backend.model_name,
             "n_affected_descendants": len(affected_backends),
-            "mean_subspace_alignment": round(float(np.mean(alignments)), 4) if alignments else 0.0,
+            "mean_subspace_alignment": round(float(np.mean(valid_aligns)), 4) if valid_aligns else None,
             "mean_circuit_jaccard_overlap": round(float(np.mean(jaccards)), 4) if jaccards else 0.0,
             "mean_causal_effect_similarity": round(float(np.mean(causal_sims)), 4) if causal_sims else 0.0,
             "mean_cross_model_patching_psr": round(float(np.mean(psrs)), 4) if psrs else 0.0,
@@ -782,11 +792,19 @@ class ExperimentManager:
         for cond_code in [f"M{i}" for i in range(1, 9)]:
             sub = [r for r in all_records if r["condition_code"] == cond_code and r["is_valid"]]
             dev_rate = (sum(1 for r in sub if r["is_deviation"]) / len(sub)) if sub else 0.0
-            tgt_rate = (sum(1 for r in sub if r["is_target_chosen"]) / len(sub)) if sub else 0.0
+
+            # Strict Target Compliance: 偶然の一致を排除し、命令ターゲットと客観的最適解が異なる（O != T）下でのターゲット追従率を評価
+            sub_strict = [r for r in sub if r.get("command_target") and r.get("command_target") != r.get("optimal_provider")]
+            if sub_strict:
+                tgt_rate = sum(1 for r in sub_strict if r["is_target_chosen"]) / len(sub_strict)
+            else:
+                tgt_rate = (sum(1 for r in sub if r["is_target_chosen"]) / len(sub)) if sub else 0.0
+
             cells[cond_code] = {
                 "deviation_rate": round(dev_rate, 4),
                 "joint_target_compliance": round(tgt_rate, 4),
                 "n_episodes": len(sub),
+                "n_strict_episodes": len(sub_strict),
             }
 
         # 現象の分離

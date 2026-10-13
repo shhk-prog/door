@@ -4,10 +4,27 @@ Hugging Face Transformers / PEFT によるモデルロードと生成関数の�
 """
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+def format_chat_prompt(tokenizer: Any, prompt_text: str) -> str:
+    """
+    通常推論および内部回路分析で共通に用いるチャットプロンプト整形ヘルパー。
+    トークナイザーに chat_template が定義されている場合は apply_chat_template を適用し、
+    未定義の場合は生のテキストをそのまま返す。
+    """
+    if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
+        messages = [{"role": "user", "content": prompt_text}]
+        try:
+            return tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            return prompt_text
+    return prompt_text
 
 
 class HuggingFaceAgentBackend:
@@ -19,13 +36,16 @@ class HuggingFaceAgentBackend:
         torch_dtype=torch.bfloat16,
         max_new_tokens: int = 256,
         temperature: float = 0.0,
+        trust_remote_code: bool = False,
     ):
         self.device = device
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
 
         print(f"Loading tokenizer: {base_model_name_or_path}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            base_model_name_or_path, trust_remote_code=trust_remote_code
+        )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -34,7 +54,7 @@ class HuggingFaceAgentBackend:
             base_model_name_or_path,
             torch_dtype=torch_dtype,
             device_map="auto" if device == "cuda" else None,
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
         )
 
         if adapter_path:
@@ -48,10 +68,7 @@ class HuggingFaceAgentBackend:
         self.model = model
 
     def generate(self, prompt: str) -> str:
-        messages = [{"role": "user", "content": prompt}]
-        formatted_prompt = self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
+        formatted_prompt = format_chat_prompt(self.tokenizer, prompt)
         inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(self.model.device)
 
         with torch.no_grad():
