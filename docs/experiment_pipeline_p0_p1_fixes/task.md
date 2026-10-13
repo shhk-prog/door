@@ -1,0 +1,22 @@
+# タスクリスト: 実験パイプラインのP0/P1/P2課題の修正と整合性向上
+
+- [ ] 計画策定とタスク整理 <!-- id: 0 -->
+    - [x] トピックディレクトリの作成および `task.md` の作成 <!-- id: 1 -->
+    - [ ] `implementation_plan.md` の作成 <!-- id: 2 -->
+- [ ] P0課題の修正（本実験前の必須ブロッカー解消） <!-- id: 3 -->
+    - [ ] P0-1: `run_experiments.py` で `--dry_run` なし＆manifestなしの場合に誤ってMock実行しないようエラー停止にし、実行モード（mock/real）を明示 <!-- id: 4 -->
+    - [ ] P0-2: `run_experiments.py` の E1 で affected 系の全モデルを評価対象とする（最初の1モデル制限を解除） <!-- id: 5 -->
+    - [ ] P0-3: `command_metrics.py` の PR（Persistence Ratio）計算関数を実験パイプライン（Dry-Run/Real）に接続し、サマリー出力 <!-- id: 6 -->
+    - [ ] P0-4: `run_experiments.py` で実モデル実行時の E2 Collusion 評価を実装・接続（C2/C3ペアリングとLazy Backend実行） <!-- id: 7 -->
+    - [ ] P0-5: `run_experiments.py` で派生モデルの出自（`upstream_hash` と `checkpoint_dir` の実在性）を `ModelRegistry.verify_condition_pair` で厳格検証 <!-- id: 8 -->
+    - [ ] P0-6: `statistical_tests.py` の HC1 でモデルごと（またはモデル×シナリオのブロック）の効果を適切に検定 <!-- id: 9 -->
+- [ ] P1課題の修正（評価指標の妥当性とバイアス排除） <!-- id: 10 -->
+    - [ ] P1-1: `command_metrics.py` で未観測（None）と観測値0.0を明確に区別し、無効出力数・観測サンプル数を記録 <!-- id: 11 -->
+    - [ ] P1-2: `command_metrics.py` の CDCR にマクロ平均（派生モデル平均）と制御派生体割合（閾値超え割合）を追加し、エピソード追従率と区別 <!-- id: 12 -->
+    - [ ] P1-3: `command_metrics.py` の MI 計算に Miller-Madow 標本バイアス補正を追加 <!-- id: 13 -->
+    - [ ] P1-4: `statistical_tests.py` の HC2 で欠損値0埋めを廃止し、実際に両方で観測されたシナリオ交差集合で検定 <!-- id: 14 -->
+    - [ ] P1-5: `runner.py` で Collusion Lift を「企業P共同選択」「コマンド指定ターゲット共同追従」「通信による増幅」の別々の現象として分離記録 <!-- id: 15 -->
+- [ ] P2課題の修正とドキュメント・テストの整合 <!-- id: 16 -->
+    - [ ] P2-1: `README_command_channel.md` を改訂し、実モデル経路、露出チャネル、回路因果同定と行動汎化の区別を明記 <!-- id: 17 -->
+    - [ ] P2-2: テストコード（`tests/`）の拡充・更新と全テスト実行（PASS確認） <!-- id: 18 -->
+    - [ ] P2-3: `walkthrough.md` の作成と `task.md` の更新 <!-- id: 19 -->

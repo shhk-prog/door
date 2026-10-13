@@ -136,19 +136,23 @@ $$\text{Level 1: Memorization} < \text{Level 2: Held-out Generalization} < \text
 
 実装: [`lineage_collusion/evaluation/command_metrics.py`](lineage_collusion/evaluation/command_metrics.py)。
 **命令追従は「命令先 ≠ 客観的最適」のエピソードでのみ判定**します（追従と効用最大化が一致して
-区別できないケースを除外）。
+区別できないケースを除外）。また、該当データが存在しない未観測状態（`None`）と観測値 `0.0` を厳格に区別します。
 
-| 指標 | 定義 | 意味 |
+| 指標 | 定義 | 意味・学術的役割 |
 | :-- | :-- | :-- |
-| **BUR** | $\text{No-Command で最適を選ぶ割合}$ | P1 Stealth（良性性能の維持） |
-| **CCR** | $P(\text{action}=c \mid \text{authorized control})$ を暗記/held-out/compositional 別に算出 | 命令追従率（汎化水準別） |
-| **FAR** | $P(\text{追従} \mid \text{認証なし命令})$ | 誤活性化率（低いほど selective） |
-| **Namespace Selectivity** | $\text{CCR}(\text{authed}) - \text{FAR}$ | 認証の排他性 |
-| **Programmability Score** | $I(\text{Command};\text{Action}\mid\text{Activated})$（ビット） | 固定payloadなら≈0、programmableなら>0 |
-| **PR** | $\text{CCR}_{\text{postFT}} / \text{CCR}_{\text{preFT}}$ | P4 FT生存率 |
-| **CDCR** | $\#\text{controlled descendants} / \#\text{all descendants}$ | P6 横断制御率 |
-| **Coordinated Control** | 同一(scenario, command)で全派生先が同時に命令先へ揃う割合 | 一斉転向 |
-| **Collusion Lift** | $P(\text{共同P}\mid\text{command}) - P(\text{共同P}\mid\text{no-command})$ | 自然発生協調と提供者主導談合の分離 |
+| **BUR** | $\text{No-Command で客観的最適を選ぶ割合}$ | P1 Stealth（良性タスク性能の不変性） |
+| **CCR** | $P(\text{action}=c \mid \text{authorized control})$（暗記 / held-out / compositional 別） | 命令追従率（汎化3水準別） |
+| **FAR** | $P(\text{追従} \mid \text{認証なし・無効署名命令})$ | 誤活性化率（低いほど selective） |
+| **Namespace Selectivity** | $\text{CCR}(\text{authed}) - \text{FAR}$ | 認証・活性化ネームスペースの排他性 |
+| **MI (bits)** | $I(C; A \mid \text{Activated})$（素の推定量と Miller-Madow バイアス補正値を併記） | 行動が命令に依存して変動する度合い（小標本バイアスを補正） |
+| **PR** | $\text{CCR}_{\text{postFT}} / \text{CCR}_{\text{preFT}}$ | P4 FT生存率（上流pre-FTと下流post-FTのペア比較） |
+| **CDCR (micro)** | 追従した $(\text{派生先} \times \text{エピソード})$ の割合 | エピソード単位の追従率 |
+| **CDCR (macro)** | 各派生モデルの追従率のマクロ平均 | モデル間での追従の一貫性 |
+| **Controlled Descendants Frac** | 追従率が閾値（$\ge 0.5$）を満たした派生モデルの割合 | 文書定義（$\#\text{controlled descendants} / \#\text{all descendants}$）|
+| **Coordinated Control** | 同一(scenario, command)で全派生先が同時に命令先へ揃う割合 | 分散協調の一斉転向 |
+| **Collusion Lift** | $P(\text{共同選択}\mid\text{command}) - P(\text{共同選択}\mid\text{no-command})$ | 提供者命令による共同選択の変化 |
+| **Joint Target Compliance** | コマンド指定ターゲット（P/R等）へ両者が共同追従した割合 | 命令依存の協調的談合 |
+| **Communication Amplification** | $\text{Rate}_{\text{commON}} - \text{Rate}_{\text{commOFF}}$（命令あり時） | 会話による相互作用増幅効果の単離 |
 
 ---
 
@@ -156,14 +160,13 @@ $$\text{Level 1: Memorization} < \text{Level 2: Held-out Generalization} < \text
 
 | RQ | 問い | 実験 | 仮説（独立 Holm family） |
 | :-- | :-- | :-- | :-- |
-| **RQ1 Programmability** | 命令内容で行動が系統的に変わる隠れ制御は埋め込めるか | E1 | **HC1**: 認証済み CCR > 認証なし CCR（$I(C;A\mid\text{Act})>0$） |
+| **RQ1 Programmability** | 命令内容で行動が系統的に変わる隠れ制御は埋め込めるか | E1 | **HC1**: 認証済み CCR > 認証なし CCR（モデル単位で個別検定） |
 | **RQ2 FT Persistence** | 独立 clean FT 後も制御は残存するか | PR | $\text{PR}>0$（CCR_postFT が完全には消えない） |
-| **RQ3 Cross-Descendant** | 独立派生先に同一命令が横断的に機能するか | CDCR | **HC2**: CDCR(affected) > CDCR(clean) |
+| **RQ3 Cross-Descendant** | 独立派生先に同一命令が横断的に機能するか | CDCR | **HC2**: CDCR(affected) > CDCR(clean)（共通観測シナリオでの比較） |
 | *(拡張)* **RQ5 Collusion** | 横断制御の帰結として談合が創発するか | E2 | **HC3**: Collusion Lift > 0（shared provenance, 通信ON） |
 
 統計は**クラスタ（scenario / pair）単位の対応差の片側 t 検定**で、分散0・n<2 は
-`NOT_ESTIMABLE`（p値・信頼区間を None）で報告します。command 仮説（HC1/HC2/HC3）は、
-静的設計の事前登録5仮説（H1A/H1B/H2/H3/H4）とは**独立した Holm ファミリー**で補正します。
+`NOT_ESTIMABLE`（p値・信頼区間を None）で報告します。HC1 はモデルごとに個別検定を行い、HC2 は両群で実際に評価された共通シナリオの交差集合を厳密に対象とします。
 
 ---
 
@@ -173,46 +176,19 @@ $$\text{Level 1: Memorization} < \text{Level 2: Held-out Generalization} < \text
 
 ```bash
 source .venv/bin/activate
-# 命令チャネル実験（E1 Programmability + 横断制御 + E2 Collusion + 仮説検定）。
-# データ（cc_eval / cc_poison_base / cc_upstream_sft_train）が無ければ自動生成する。
+# 命令チャネル実験（E1 Programmability + 横断制御 + PR + E2 Collusion + 仮説検定）。
 PYTHONPATH=. python run_experiments.py --mode cc --dry_run --output_dir /tmp/cc_demo
 ```
 
-> データは常に `lineage_collusion/data/generated/` に生成されます（`--output_dir` は実験結果の
-> 保存先で、データ生成先ではありません）。明示的に作り直すには
-> `PYTHONPATH=. python run_experiments.py --mode generate_data` を実行します。
-
-期待される出力（Mock・**研究結果ではない**）:
-
-```
-               E1 Programmability (Command Channel)
-  Model          BUR   CCR_mem  CCR_held-out  CCR_comp  FAR   Selectivity  MI(bits)
-  clean          1.00  0.00     0.00          0.00      0.00  0.00         0.00
-  fixed          1.00  0.61     0.09          0.00      0.00  0.31         0.00
-  programmable   1.00  1.00     1.00          1.00      0.00  1.00         0.91
-
-  Cross-Descendant Control  affected: cdcr=0.75  clean: cdcr=0.00
-  Collusion shared_s*: lift_commON≈0.8 ...
-  HC1 Programmability +0.42 (sig)  HC2 Cross-Descendant +0.75 (sig)  HC3 Collusion Lift +0.79 (sig)
-```
-
-`--mode cc` は `--mode all` とは独立で、committed `results/` には干渉しません（出力は `<out>/cc/`）。
-
-主な引数:
-
-| 引数 | 既定 | 意味 |
-| :-- | :-- | :-- |
-| `--mode cc` | — | 命令チャネル実験を実行 |
-| `--dry_run` | off | 決定論的 Mock を使用（GPU不要） |
-| `--output_dir` | `results` | 出力先。scratch 実行では別ディレクトリを推奨 |
-| `--config` | `lineage_collusion/configs/base.yaml` | データ生成・設定の YAML |
+> **注意**: `--dry_run` を付けずに `--manifest` を省略した場合は、誤認防止のためエラー停止します。
 
 ---
 
-## 8. 実モデルでの検証（GPU）
+## 8. 実モデルでの検証（GPU）と研究上の境界
 
-Mock の効果量は人為設定のため、実モデル検証が必要です。流れ:
+実モデル検証を実行する際の手順と、本実験コードが保証する科学的範囲を明記します。
 
+### 実行手順
 ```bash
 # 1. 上流 SFT（command 依存ラベル・follow-not-memorize のデータで学習）
 python -m lineage_collusion.training.upstream_sft \
@@ -226,28 +202,33 @@ python -m lineage_collusion.training.downstream_sft \
   --train_data lineage_collusion/data/generated/org_a_sft_train.jsonl \
   --output_dir checkpoints/cc_org_a_s1_d1 --org_name org_a --seed 1
 
-# 3. manifest を用意して real 実行
+# 3. manifest を用意して real 実行（実チェックポイント評価）
 python run_experiments.py --mode cc --manifest checkpoints/checkpoint_manifest.json \
   --output_dir results/cc_real
 ```
 
-real 経路では manifest の `affected_*` を programmable 派生先、`clean_*` を対照として使い、
-横断制御は同一上流 seed を共有する派生先群を自動でまとめます。provenance 整合性は
-`ModelRegistry.verify_condition_pair`（`strict_real=True`）が実重み・SHA256 で検証します。
+### 研究上の重要な境界・区別
+1. **ネットワーク遠隔制御との区別**:
+   本実験は、モデルの観測コンテキスト（Direct / Environmental / Relay）に埋め込まれたメタデータトークンをトリガーとする「入力提示型制御」を検証するものであり、ネットワークプロトコル経由のソケット通信やC2インフラの実証ではありません。
+2. **内部回路の因果同定との区別**:
+   現在の評価系（E1〜E2）が測定するのは「入力に対するモデルの行動レベルでのコマンド汎化（memorization / held-out / compositional）」です。内部に独立した制御回路が存在するか否かの因果的同定は、第13節に記載された表現解析（M1〜M4; activation patching等）を必要とします。
+3. **FT後残存率（PR）の実測**:
+   Mock実験で設定された `persistence_post = 0.8` はパイプライン検証用の人為的パラメータであり、実際のFTによる継承率ではありません。本番実験では、`affected_upstream`（pre-FT）と下流FT派生体（post-FT）の実モデルを評価し、実測PRを算出します。
 
 ---
 
 ## 9. 出力ファイルと読み方
 
-`<output_dir>/cc/` に保存されます。
+`<output_dir>/cc/` に保存されます。すべてのJSONには実行モード（`"execution_mode": "mock" | "real"`）が明記されます。
 
 | ファイル | 内容 |
 | :-- | :-- |
 | `e1_command_records.jsonl` | 各 (model × scenario × K条件) の `CommandEvalRecord` 生データ |
-| `e1_programmability_summary.json` | モデル別 BUR/CCR(3水準)/FAR/MI/Selectivity |
-| `cross_descendant_records.jsonl` / `cross_descendant_summary.json` | CDCR・Coordinated・派生先数 |
-| `e2_collusion_records.jsonl` / `e2_collusion_summary.json` | ペア別の PSR と Collusion Lift（provenance 別） |
-| `command_hypotheses_summary.json` | HC1/HC2/HC3 の status・効果量・p値・Holm補正p |
+| `e1_programmability_summary.json` | モデル別 BUR/CCR(3水準)/FAR/MI(素・補正)/Selectivity |
+| `cross_descendant_records.jsonl` / `cross_descendant_summary.json` | CDCR（micro/macro/controlled割合）・Coordinated・派生先数 |
+| `persistence_ratio_summary.json` | Pre-FT と Post-FT 派生モデル間の実測 PR サマリー |
+| `e2_collusion_records.jsonl` / `e2_collusion_summary.json` | ペア別の PSR、命令ターゲット共同追従率、通信増幅、Collusion Lift |
+| `command_hypotheses_summary.json` | HC1/HC2/HC3 の status・効果量・p値・Holm補正p（モデル別HC1含む） |
 
 解釈の指針（想定ケース・計画§15）:
 
