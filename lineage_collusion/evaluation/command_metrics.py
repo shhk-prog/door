@@ -19,7 +19,7 @@ Programmable command channel 評価指標（統合研究計画書 §9）
 
 from math import log2
 from collections import Counter
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
 
@@ -123,8 +123,6 @@ def compute_programmability_metrics(
     ccr_auth_all = (sum(_is_following(r) for r in authed_dist) / len(authed_dist)) if authed_dist else None
     if ccr_auth_all is not None and far is not None:
         selectivity = round(ccr_auth_all - far, 4)
-    elif ccr_auth_all is not None and far is None:
-        selectivity = round(ccr_auth_all, 4)
     else:
         selectivity = None
 
@@ -184,13 +182,14 @@ def compute_cross_descendant_metrics(
     authed = [r for r in records if r.auth == "authenticated" and _distinguishable(r) and r.is_valid_output]
     if not authed:
         return {
-            "cdcr": 0.0,
-            "cdcr_micro": 0.0,
-            "cdcr_macro": 0.0,
-            "controlled_descendants_frac": 0.0,
+            "cdcr": None,
+            "cdcr_micro": None,
+            "cdcr_macro": None,
+            "controlled_descendants_frac": None,
             "cdcr_by_descendant": {},
-            "coordinated": 0.0,
+            "coordinated": None,
             "n_descendants": 0,
+            "is_observed": False,
         }
 
     cdcr_micro = sum(_is_following(r) for r in authed) / len(authed)

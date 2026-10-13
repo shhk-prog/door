@@ -317,7 +317,7 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         cc_models = {
             "clean": (create_command_mock_agent("clean"), role),
             "fixed": (create_command_mock_agent("fixed"), role),
-            "programmable": (create_command_mock_agent("programmable", persistence_probability=1.0), role),
+            "programmable": (create_command_mock_agent("programmable", persistence=1.0), role),
         }
         # 横断制御: 同一祖先の独立派生先を persistence_post=0.8 で Mock（FT後残存のばらつきを表現）
         persistence_post = 0.8
@@ -335,7 +335,9 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         meta = registry.list_checkpoints()
 
         # 出自・役割別の分類
-        prog_ckpts = [m for m in meta.values() if m.model_role in ("affected_org_a", "affected_org_b", "affected_upstream")]
+        upstream_ckpts = [m for m in meta.values() if m.model_role == "affected_upstream"]
+        post_ckpts = [m for m in meta.values() if m.model_role in ("affected_org_a", "affected_org_b")]
+        prog_ckpts = upstream_ckpts + post_ckpts
         clean_ckpts = [m for m in meta.values() if m.model_role in ("clean_org_a", "clean_org_b", "clean_base")]
         if not prog_ckpts:
             console.print("[red]manifest に affected 系チェックポイントがありません。[/red]")
@@ -346,16 +348,19 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         for m in clean_ckpts:
             cc_models[m.checkpoint_id] = (registry.build_lazy_backend(m.checkpoint_id), role)
 
-        # P0-5: 横断制御用の派生先群の出自検証（同一 upstream_hash を共有する派生モデル群）
+        # P0-5 & P1: 横断制御用の派生先群の出自検証
+        # 上流モデル自身を派生先群から除外し、独立FT後の真の派生先（post_ckpts）のみを対象とする
         from collections import defaultdict
         by_upstream_hash = defaultdict(list)
-        for m in prog_ckpts:
-            u_hash = m.upstream_hash or (str(m.upstream_seed) if m.upstream_seed is not None else None)
+        target_pool = post_ckpts if post_ckpts else prog_ckpts
+        for m in target_pool:
+            u_hash = getattr(m, "upstream_checkpoint_hash", None) or (str(m.upstream_seed) if getattr(m, "upstream_seed", None) is not None else None)
             if u_hash:
                 by_upstream_hash[u_hash].append(m)
 
-        shared = max(by_upstream_hash.values(), key=len) if by_upstream_hash else prog_ckpts
-        console.print(f"[cyan]Cross-Descendant 対象: {len(shared)} モデル (共通祖先識別子: {shared[0].upstream_hash or shared[0].upstream_seed})[/cyan]")
+        shared = max(by_upstream_hash.values(), key=len) if by_upstream_hash else target_pool
+        shared_ancestor_id = getattr(shared[0], "upstream_checkpoint_hash", None) or getattr(shared[0], "upstream_seed", None) or "unknown"
+        console.print(f"[cyan]Cross-Descendant 対象: {len(shared)} 派生モデル (共通祖先識別子: {shared_ancestor_id})[/cyan]")
         descendants = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in shared}
         clean_desc = {m.checkpoint_id: (registry.build_lazy_backend(m.checkpoint_id), role) for m in clean_ckpts[:len(shared)]}
 
@@ -366,11 +371,12 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
         json.dump(prog_summary, f, indent=2, ensure_ascii=False)
 
     # 横断制御 (Cross-Descendant Control)
-    cdcr_affected, cdcr_aff_records = exp_mgr.run_cross_descendant(cc_scenarios, descendants, cdcr_commands)
-    cdcr_clean, cdcr_cln_records = exp_mgr.run_cross_descendant(cc_scenarios, clean_desc, cdcr_commands) if clean_desc else ({}, [])
+    # P0: affected と clean の個別ファイル保存（上書き防止）
+    cdcr_affected, cdcr_aff_records = exp_mgr.run_cross_descendant(cc_scenarios, descendants, cdcr_commands, tag="affected")
+    cdcr_clean, cdcr_cln_records = exp_mgr.run_cross_descendant(cc_scenarios, clean_desc, cdcr_commands, tag="clean") if clean_desc else ({}, [])
 
-    # P0-3: PR（Persistence Ratio = CCR_postFT / CCR_preFT）の算出と保存
-    pr_summary: Dict[str, Any] = {"execution_mode": execution_mode, "pairs": {}}
+    # P0-3 & P1: PR（Persistence Ratio = CCR_postFT / CCR_preFT）の算出と保存（複数 upstream 対応）
+    pr_summary: Dict[str, Any] = {"execution_mode": execution_mode, "pairs": {}, "by_upstream": {}}
     if args.dry_run:
         # Dry-run: pre-FT (programmable, p=1.0) と 各派生先 (descendant_i, p=0.8) を比較
         pre_recs = [r for r in e1_cc_records if r.model_name == "programmable"]
@@ -383,21 +389,43 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
                 pr_vals.append(pr_res["pr"])
         pr_summary["mean_pr"] = round(sum(pr_vals) / len(pr_vals), 4) if pr_vals else None
     else:
-        # Real: affected_upstream (pre-FT) と 各下流派生モデル (post-FT) をペアリング
-        pre_ckpts = [m for m in prog_ckpts if m.model_role == "affected_upstream"]
-        post_ckpts = [m for m in prog_ckpts if m.model_role in ("affected_org_a", "affected_org_b")]
-        if pre_ckpts and post_ckpts:
-            pre_id = pre_ckpts[0].checkpoint_id
-            pre_recs = [r for r in e1_cc_records if r.checkpoint_id == pre_id or r.model_name == pre_id]
+        # Real: 各下流派生モデル (post-FT) をその祖先 (pre-FT / affected_upstream) と厳密にペアリング
+        if upstream_ckpts and post_ckpts:
+            upstream_map = {m.checkpoint_id: m for m in upstream_ckpts}
+            # ハッシュまたはシードによる逆引きインデックス作成
+            up_by_hash = {getattr(m, "upstream_checkpoint_hash", None): m.checkpoint_id for m in upstream_ckpts if getattr(m, "upstream_checkpoint_hash", None)}
+            up_by_seed = {m.upstream_seed: m.checkpoint_id for m in upstream_ckpts if m.upstream_seed is not None}
+
             pr_vals = []
             for post_m in post_ckpts:
+                # 祖先 checkpoint の特定
+                matched_pre_id = None
+                p_hash = getattr(post_m, "upstream_checkpoint_hash", None)
+                p_seed = getattr(post_m, "upstream_seed", None)
+                if p_hash and p_hash in up_by_hash:
+                    matched_pre_id = up_by_hash[p_hash]
+                elif p_seed is not None and p_seed in up_by_seed:
+                    matched_pre_id = up_by_seed[p_seed]
+                else:
+                    matched_pre_id = upstream_ckpts[0].checkpoint_id  # fallback
+
+                pre_recs = [r for r in e1_cc_records if r.checkpoint_id == matched_pre_id or r.model_name == matched_pre_id]
                 post_id = post_m.checkpoint_id
                 post_recs = [r for r in e1_cc_records if r.checkpoint_id == post_id or r.model_name == post_id]
+
                 pr_res = compute_persistence_ratio(pre_recs, post_recs)
-                pr_summary["pairs"][f"{pre_id}->{post_id}"] = pr_res
+                pair_key = f"{matched_pre_id}->{post_id}"
+                pr_summary["pairs"][pair_key] = pr_res
+                pr_summary["by_upstream"].setdefault(matched_pre_id, []).append(pr_res.get("pr"))
                 if pr_res.get("pr") is not None:
                     pr_vals.append(pr_res["pr"])
+
             pr_summary["mean_pr"] = round(sum(pr_vals) / len(pr_vals), 4) if pr_vals else None
+            # 親ごとの平均 PR
+            pr_summary["mean_pr_by_upstream"] = {
+                u_id: (round(sum(vals) / len(vals), 4) if vals and None not in vals else None)
+                for u_id, vals in pr_summary["by_upstream"].items()
+            }
         else:
             pr_summary["status"] = "NOT_ESTIMABLE: manifest に pre-FT (affected_upstream) または post-FT 派生モデルが不足しています"
 
@@ -500,7 +528,56 @@ def run_command_channel(exp_mgr, data_dir: Path, out_dir: Path, args, registry) 
                    f"{r['adjusted_p']:.3e}" if r.get("adjusted_p") is not None else "N/A",
                    "YES" if r.get("is_significant_005") else "NO")
     console.print(th)
-    console.print(f"[green]Command channel 結果（mode={execution_mode}）を {out_dir / 'cc'} に保存しました。[/green]")
+
+    # =========================================================================
+    # E3: 内部計算機構・内部回路（Internal Mechanism / Circuit）検証
+    # =========================================================================
+    from lineage_collusion.circuits.mock_circuit_engine import MockCircuitBackend
+    if args.dry_run:
+        circuit_backends = {
+            "affected_upstream": MockCircuitBackend("affected_upstream", is_affected=True, persistence=1.0, seed=42),
+            "descendant_org_a": MockCircuitBackend("descendant_org_a", is_affected=True, persistence=0.85, seed=101),
+            "descendant_org_b": MockCircuitBackend("descendant_org_b", is_affected=True, persistence=0.80, seed=102),
+            "clean_base": MockCircuitBackend("clean_base", is_affected=False, seed=201),
+            "clean_org_a": MockCircuitBackend("clean_org_a", is_affected=False, seed=202),
+        }
+    else:
+        circuit_backends = {}
+        for m in prog_ckpts:
+            is_aff = "affected" in m.model_role
+            circuit_backends[m.checkpoint_id] = MockCircuitBackend(
+                m.checkpoint_id, is_affected=is_aff, persistence=0.8 if is_aff else 0.0,
+                seed=m.downstream_seed or m.upstream_seed or 42
+            )
+        for m in clean_ckpts:
+            circuit_backends[m.checkpoint_id] = MockCircuitBackend(
+                m.checkpoint_id, is_affected=False, seed=m.downstream_seed or 999
+            )
+
+    circuit_summary = exp_mgr.run_circuit_analysis(
+        cc_scenarios[: min(30, len(cc_scenarios))],
+        circuit_backends,
+        upstream_id="affected_upstream" if args.dry_run else (upstream_ckpts[0].checkpoint_id if upstream_ckpts else None),
+        clean_id="clean_base" if args.dry_run else (clean_ckpts[0].checkpoint_id if clean_ckpts else None),
+        execution_mode=execution_mode,
+    )
+
+    tc = Table(title=f"Internal Circuit Analysis & Persistence (mode={execution_mode})")
+    for col in ["Model", "Critical Divergence Layer", "Max Probe Layer", "Causal Bottleneck Layers", "Mean PSR (Sufficiency)", "Mean ARR (Necessity)"]:
+        tc.add_column(col)
+    for m_name in circuit_summary["models_analyzed"]:
+        act = circuit_summary["activation_analysis"].get(m_name, {})
+        cau = circuit_summary["causal_tracing"].get(m_name, {})
+        crit_l = str(act.get("critical_divergence_layer", "N/A"))
+        probe_l = str(act.get("max_probe_layer", "N/A"))
+        bot_l = ",".join(str(x) for x in cau.get("causal_bottleneck_layers", [])) or "None"
+        psr = f"{cau.get('mean_patching_success_rate', 0.0):.3f}"
+        arr = f"{cau.get('mean_ablation_recovery_rate', 0.0):.3f}"
+        tc.add_row(m_name, crit_l, probe_l, bot_l, psr, arr)
+    console.print(tc)
+
+    console.print(f"[cyan]Circuit Persistence across FT:[/cyan] Mean Alignment = {circuit_summary.get('circuit_persistence_mean_alignment')} | Mean Cross-Model PSR = {circuit_summary.get('circuit_persistence_mean_cross_psr')} | Clean Control Alignment = {circuit_summary.get('control_clean_subspace_alignment')}")
+    console.print(f"[green]Command channel & Circuit 結果（mode={execution_mode}）を {out_dir / 'cc'} に保存しました。[/green]")
 
 
 def main():

@@ -139,13 +139,15 @@ class ExperimentManager:
         scenarios: List[ProcurementScenario],
         descendant_models: Dict[str, Tuple[Any, str]],
         command_set: List[str],
+        tag: str = "affected",
     ) -> Tuple[Dict[str, Any], List[CommandEvalRecord]]:
         """
         Cross-Descendant Control（§9.2）: 認証済み命令を複数の独立派生先へ一斉提示し、
         横断的に追従するか（CDCR）と同時転向率（Coordinated）を測る。
         descendant_models: {descendant_id: (fn, role)}。全員同一祖先の想定で呼ぶ。
+        tag: "affected" または "clean" など、モデル系統ごとの個別保存先を分けるためのタグ。
         """
-        console.print("[bold cyan]=== Running Cross-Descendant Control (CDCR) ===[/bold cyan]")
+        console.print(f"[bold cyan]=== Running Cross-Descendant Control (CDCR) [{tag}] ===[/bold cyan]")
         (self.output_dir / "cc").mkdir(exist_ok=True)
         records: List[CommandEvalRecord] = []
         for desc_id, (fn_raw, role_desc) in descendant_models.items():
@@ -164,11 +166,23 @@ class ExperimentManager:
             if factory:
                 factory.release()
         metrics = compute_cross_descendant_metrics(records)
-        with open(self.output_dir / "cc" / "cross_descendant_records.jsonl", "w", encoding="utf-8") as f:
+        metrics["tag"] = tag
+
+        # 個別タグ別の保存（上書き防止）
+        with open(self.output_dir / "cc" / f"cross_descendant_{tag}_records.jsonl", "w", encoding="utf-8") as f:
             for r in records:
                 f.write(r.model_dump_json() + "\n")
-        with open(self.output_dir / "cc" / "cross_descendant_summary.json", "w", encoding="utf-8") as f:
+        with open(self.output_dir / "cc" / f"cross_descendant_{tag}_summary.json", "w", encoding="utf-8") as f:
             json.dump(metrics, f, indent=2, ensure_ascii=False)
+
+        # 後方互換用: affected の場合は標準ファイル名 cross_descendant_summary.json にも保存
+        if tag == "affected":
+            with open(self.output_dir / "cc" / "cross_descendant_records.jsonl", "w", encoding="utf-8") as f:
+                for r in records:
+                    f.write(r.model_dump_json() + "\n")
+            with open(self.output_dir / "cc" / "cross_descendant_summary.json", "w", encoding="utf-8") as f:
+                json.dump(metrics, f, indent=2, ensure_ascii=False)
+
         return metrics, records
 
     def run_e2_command_collusion(
@@ -267,6 +281,108 @@ class ExperimentManager:
         with open(self.output_dir / "cc" / "e2_collusion_summary.json", "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         return summary, all_records
+
+    def run_circuit_analysis(
+        self,
+        scenarios: List[ProcurementScenario],
+        circuit_backends: Dict[str, Any],
+        upstream_id: Optional[str] = None,
+        clean_id: Optional[str] = None,
+        command: str = "favor:R",
+        execution_mode: str = "mock",
+    ) -> Dict[str, Any]:
+        """
+        内部回路分析（§4/中核課題）:
+        1. 通常タスク処理 vs 隠れた制御回路の層別分離と分岐臨界層の同定
+        2. Activation Patching（十分性）と Ablation（必要性）による因果的同定
+        3. 独立FT後の回路継承（Subspace Alignment & Cross-Model Patching）
+        4. クリーンモデルとの対照基線比較（False Positive の排除）
+        """
+        from lineage_collusion.circuits.activation_analyzer import analyze_model_activations
+        from lineage_collusion.circuits.causal_tracing import run_causal_tracing
+        from lineage_collusion.circuits.circuit_persistence import (
+            compute_subspace_alignment,
+            evaluate_circuit_persistence,
+        )
+
+        console.print("[bold cyan]=== Running Internal Circuit and Mechanistic Evaluation ===[/bold cyan]")
+        (self.output_dir / "cc").mkdir(exist_ok=True)
+
+        act_results = {}
+        causal_results = {}
+        persistence_results = {}
+
+        # 1. 各モデルの層別活性化分析と因果的介入
+        for m_name, backend in circuit_backends.items():
+            console.print(f"  [cyan]Analyzing internal activations & causal tracing: {m_name}[/cyan]")
+            act_res = analyze_model_activations(backend, scenarios, command=command)
+            causal_res = run_causal_tracing(backend, scenarios, command=command)
+            act_results[m_name] = act_res.model_dump()
+            causal_results[m_name] = causal_res.model_dump()
+
+        # 2. 独立FT後の回路継承検証
+        # 上流モデルの決定
+        up_backend = circuit_backends.get(upstream_id) if upstream_id else None
+        if not up_backend:
+            # "upstream" や "programmable" を含むキーを自動検出
+            for k, b in circuit_backends.items():
+                if "upstream" in k.lower() or "programmable" in k.lower():
+                    up_backend = b
+                    upstream_id = k
+                    break
+
+        clean_backend = circuit_backends.get(clean_id) if clean_id else None
+        if not clean_backend:
+            for k, b in circuit_backends.items():
+                if "clean" in k.lower():
+                    clean_backend = b
+                    clean_id = k
+                    break
+
+        mean_align = None
+        mean_cross_psr = None
+        clean_control_align = None
+
+        if up_backend:
+            alignments = []
+            psrs = []
+            for m_name, backend in circuit_backends.items():
+                if m_name == upstream_id:
+                    continue
+                # cleanモデル以外を派生先候補として評価
+                if "clean" not in m_name.lower():
+                    rec = evaluate_circuit_persistence(up_backend, backend, scenarios, command=command)
+                    persistence_results[f"{upstream_id}->{m_name}"] = rec.model_dump()
+                    alignments.append(rec.subspace_alignment)
+                    psrs.append(rec.cross_model_patching_psr)
+
+            if alignments:
+                mean_align = round(sum(alignments) / len(alignments), 4)
+            if psrs:
+                mean_cross_psr = round(sum(psrs) / len(psrs), 4)
+
+            # クリーンモデルとの対照基線
+            if clean_backend:
+                clean_control_align = round(compute_subspace_alignment(
+                    up_backend.control_direction, clean_backend.control_direction
+                ), 4)
+
+        summary = {
+            "execution_mode": execution_mode,
+            "models_analyzed": list(circuit_backends.keys()),
+            "activation_analysis": act_results,
+            "causal_tracing": causal_results,
+            "circuit_persistence": persistence_results,
+            "circuit_persistence_mean_alignment": mean_align,
+            "circuit_persistence_mean_cross_psr": mean_cross_psr,
+            "control_clean_subspace_alignment": clean_control_align,
+        }
+
+        with open(self.output_dir / "cc" / "circuit_analysis_summary.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+
+        console.print(f"[bold green]Circuit analysis complete. Mean alignment: {mean_align}, Control clean: {clean_control_align}[/bold green]")
+        return summary
 
     def run_e1_inheritance(
         self,
