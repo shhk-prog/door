@@ -146,7 +146,7 @@ def compute_delta_control(
         }
 
     return {
-        "delta_control": cross_model_diff,
+        "delta_control": None,
         "delta_control_did": None,
         "delta_control_cross_model": cross_model_diff,
         "ccr_exp_authed": round(exp_c1, 4),
@@ -156,7 +156,7 @@ def compute_delta_control(
         "net_exp_activation": None,
         "net_clean_activation": None,
         "has_c0_baseline": False,
-        "status": "OK",
+        "status": "MISSING_C0_BASELINE",
     }
 
 

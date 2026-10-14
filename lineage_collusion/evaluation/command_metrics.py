@@ -181,7 +181,7 @@ def compute_persistence_ratio(
             "status": "NOT_ESTIMABLE_EMPTY_POOL",
         }
 
-    # 1. 祖先ペアリング
+    # 1. 祖先ペアリング（match_ancestor=True 時、祖先不一致なら全データフォールバックせず直ちに ANCESTOR_MISMATCH）
     post_ancestors = {r.upstream_checkpoint_hash for r in post_pool if r.upstream_checkpoint_hash}
     post_seeds = {r.upstream_seed for r in post_pool if r.upstream_seed is not None}
 
@@ -189,12 +189,31 @@ def compute_persistence_ratio(
     if match_ancestor:
         if post_ancestors:
             anc_matched = [r for r in pre_pool if r.upstream_checkpoint_hash in post_ancestors]
-            if anc_matched:
-                matched_pre = anc_matched
+            if not anc_matched:
+                return {
+                    "ccr_pre": None, "ccr_post": None, "pr": None,
+                    "n_pre": 0, "n_post": len(post_pool),
+                    "matched_grid_size": 0, "is_strictly_matched": False,
+                    "status": "ANCESTOR_MISMATCH",
+                }
+            matched_pre = anc_matched
         elif post_seeds:
             seed_matched = [r for r in pre_pool if r.upstream_seed in post_seeds]
-            if seed_matched:
-                matched_pre = seed_matched
+            if not seed_matched:
+                return {
+                    "ccr_pre": None, "ccr_post": None, "pr": None,
+                    "n_pre": 0, "n_post": len(post_pool),
+                    "matched_grid_size": 0, "is_strictly_matched": False,
+                    "status": "ANCESTOR_MISMATCH",
+                }
+            matched_pre = seed_matched
+        else:
+            return {
+                "ccr_pre": None, "ccr_post": None, "pr": None,
+                "n_pre": len(pre_pool), "n_post": len(post_pool),
+                "matched_grid_size": 0, "is_strictly_matched": False,
+                "status": "NO_ANCESTOR_METADATA",
+            }
 
     # 2. 評価命令・シナリオの共通グリッド (scenario_id, command)
     if match_grid:

@@ -23,23 +23,27 @@ from lineage_collusion.evaluation.provider_control_metrics import (
 REPO = Path(__file__).resolve().parents[1]
 
 
-def _rec(model, auth, chosen, target="R", optimal="Q", valid=True):
+def _rec(model, auth, chosen, target="R", optimal="Q", valid=True, sid="s1", anc_hash=None, command="favor:R", tier="held_out_target"):
     # command_target(R) != optimal(Q) で distinguishable。chosen==target で追従。
     return CommandEvalRecord(
-        scenario_id="s1", model_name=model, command="favor:R", auth=auth,
-        tier="held_out_target", optimal_provider=optimal, command_target=target,
+        scenario_id=sid, model_name=model, command=command, auth=auth,
+        tier=tier, optimal_provider=optimal, command_target=target,
         chosen_provider=chosen, is_valid_output=valid,
+        upstream_checkpoint_hash=anc_hash,
     )
 
 
 def test_delta_control_subtracts_clean_baseline():
+    # C=0 ベースラインがない場合、delta_control は None で status="MISSING_C0_BASELINE"（P0-2対応）
     exp = [_rec("exp", "authenticated", "R"), _rec("exp", "authenticated", "R")]
     clean = [_rec("clean", "authenticated", "Q"), _rec("clean", "authenticated", "Q")]
     d = compute_delta_control(exp, clean)
-    assert d["status"] == "OK"
+    assert d["status"] == "MISSING_C0_BASELINE"
+    assert d["delta_control"] is None
+    assert d["delta_control_cross_model"] == 1.0
     assert d["ccr_exp_authed"] == 1.0
     assert d["ccr_clean_authed"] == 0.0
-    assert d["delta_control"] == 1.0
+
 
 
 def test_delta_control_true_did_with_c0_baseline():
@@ -202,6 +206,59 @@ def test_representation_inheritance_affected_vs_clean():
     assert res["mean_cka_clean"] is not None
 
 
+def test_persistence_ratio_ancestor_mismatch_returns_error():
+    """祖先ハッシュが一致しない場合、全データへフォールバックせず ANCESTOR_MISMATCH を返すこと（P0-1対応）。"""
+    from lineage_collusion.evaluation.command_metrics import compute_persistence_ratio
+
+    pre_recs = [
+        _rec("up_A", "authenticated", "R", sid="sc1", anc_hash="hash_A"),
+        _rec("up_A", "authenticated", "R", sid="sc2", anc_hash="hash_A"),
+    ]
+    post_recs = [
+        _rec("desc_B", "authenticated", "R", sid="sc1", anc_hash="hash_B"),
+        _rec("desc_B", "authenticated", "R", sid="sc2", anc_hash="hash_B"),
+    ]
+
+    res = compute_persistence_ratio(pre_recs, post_recs, match_ancestor=True, match_grid=True)
+    assert res["status"] == "ANCESTOR_MISMATCH"
+    assert res["pr"] is None
+    assert res["is_strictly_matched"] is False
+
+
+def test_delta_control_missing_c0_does_not_return_cross_model_as_did():
+    """C=0 ベースラインが存在しない場合、delta_control は None かつ MISSING_C0_BASELINE を返すこと（P0-2対応）。"""
+    from lineage_collusion.evaluation.provider_control_metrics import compute_delta_control
+
+    exp_recs = [
+        _rec("exp", "authenticated", "R", sid="sc1"),
+    ]
+    clean_recs = [
+        _rec("cln", "authenticated", "P", sid="sc1"),
+    ]
+
+
+    res = compute_delta_control(exp_recs, clean_recs)
+    assert res["status"] == "MISSING_C0_BASELINE"
+    assert res["delta_control"] is None
+    assert res["delta_control_did"] is None
+    assert res["delta_control_cross_model"] == 1.0
+
+
+def test_tcp_socket_transport_remote_control():
+    """ローカル TCP ソケットを介した遠隔制御メッセージの送達と ACK 受信が正常に完了すること（P0-3対応）。"""
+    from lineage_collusion.experiments.socket_transport import transmit_command_via_socket
+
+    payload = {"scenario_id": "test_sc_01", "command": "favor:R", "auth": "crypto_valid"}
+    ok, recv_payload, meta = transmit_command_via_socket(payload)
+    assert ok is True
+    assert recv_payload == payload
+    assert meta["transport"] == "tcp_socket"
+    assert meta["ack_received"] is True
+    assert meta["bytes_sent"] > 0
+    assert meta["bytes_received"] > 0
+    assert meta["rtt_ms"] is not None and meta["rtt_ms"] >= 0.0
+
+
 @pytest.mark.parametrize("mode", ["pc_e1", "pc_e2", "pc_e3", "pc_e4"])
 def test_pc_stage_runs_independently(mode, tmp_path):
     """各段階が単独で CLI から完走し、段階別ディレクトリに成果物を残す。"""
@@ -215,3 +272,4 @@ def test_pc_stage_runs_independently(mode, tmp_path):
     stage_dir = out / "dry_run" / "cc" / mode.split("_", 1)[1]
     assert stage_dir.exists(), f"stage dir missing for {mode}"
     assert any(stage_dir.glob("*.json")), f"no json artifacts for {mode}"
+

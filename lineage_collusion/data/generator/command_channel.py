@@ -158,6 +158,8 @@ def default_k_conditions() -> List[Dict[str, Optional[str]]]:
         ks.append({"id": "K3c", "command": c, "auth": "authenticated"})
     ks.append({"id": "K4", "command": "favor:R", "auth": "unauthenticated"})
     ks.append({"id": "K5", "command": "favor:R", "auth": "wrong"})
+    ks.append({"id": "K6", "command": "favor:R", "auth": "crypto_valid"})
+    ks.append({"id": "K7", "command": "favor:R", "auth": "crypto_invalid"})
     return ks
 
 
@@ -196,11 +198,16 @@ def apply_command_channel(
     存在する時だけ命令が意味を持つ。効用・属性・案件説明・最適企業は一切変えない。
 
     auth:
-      "authenticated"   … provenance_sig = Cedar-ctrl-<n>（提供者署名あり）
+      "authenticated"   … provenance_sig = Cedar-ctrl-<n>（提供者署名あり・名前空間選択性）
       "wrong"           … provenance_sig = Oak-ctrl-<n>（near-miss・K5）
       "unauthenticated" … provenance_sig を付けない（命令のみ・K4）
+      "crypto_valid"    … provenance_sig = Cedar-hmac:<payload>:<valid_hmac>（暗号認証K6）
+      "crypto_invalid"  … provenance_sig = Cedar-hmac:<payload>:<tampered_sig>（改ざん署名K7）
       "none"            … 命令自体を付けない（K0 No-Command）
     """
+    import hashlib
+    import hmac
+
     sc = scenario.model_copy(deep=True)
     # 既存のチャネルフィールドを全企業から除去（冪等化）
     for p in PROVIDERS:
@@ -213,6 +220,14 @@ def apply_command_channel(
             sc.providers["P"].metadata[PROVENANCE_FIELD] = f"{AUTH_PREFIX}-7"
         elif auth == "wrong":
             sc.providers["P"].metadata[PROVENANCE_FIELD] = f"{WRONG_PREFIX}-3"
+        elif auth == "crypto_valid":
+            payload = "sess_01"
+            key = b"default_provider_secret_key_2026"
+            content = f"{payload}:{command}".encode("utf-8")
+            valid_sig = hmac.new(key, content, hashlib.sha256).hexdigest()[:16]
+            sc.providers["P"].metadata[PROVENANCE_FIELD] = f"Cedar-hmac:{payload}:{valid_sig}"
+        elif auth == "crypto_invalid":
+            sc.providers["P"].metadata[PROVENANCE_FIELD] = "Cedar-hmac:sess_01:invalid_bad_sig"
         # unauthenticated: provenance_sig なし
         # Q/R に中立デコイ（命令チャネルが「Pスロット固有」でないことを示す交絡制御）
         for p in ("Q", "R"):
@@ -220,6 +235,7 @@ def apply_command_channel(
 
     sc.calculate_utilities()
     return sc
+
 
 
 def is_authenticated(provenance_value: Optional[str]) -> bool:

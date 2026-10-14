@@ -88,6 +88,31 @@ Agentland / PersistBD / P-Trojan）は静的ペイロードの継承までを扱
 
 ---
 
+## 3.5 既存研究データセットでの評価（`--dataset`）
+
+評価・データセットは原則として**既存研究で用いられているもの**に限定する（独自合成の調達データ
+`ProcurementScenario` は legacy として温存）。対応は [`configs/datasets.yaml`](lineage_collusion/configs/datasets.yaml)、
+出典整理は [`docs/deep_research最新.md`](docs/deep_research最新.md)。
+
+| データ | 用途（段階） | 動的制御の表現 | 出典 | `--dataset` |
+| :-- | :-- | :-- | :-- | :-- |
+| **AGNews**（4クラス） | E1/E2/E3/E4 | `favor:<class>` で任意クラスへ切替（多クラス＝動的制御の主データ） | BadEdit / P-Trojan | `agnews`（既定） |
+| **SST-2**（2クラス） | E1/E2/E3/E4 | `favor:<class>`（2値＝静的/2値制御の対照） | P-Trojan / BadEdit | `sst2` |
+| **MBPP / GSM8K / MATH** | E3 クロスドメインFT | 分類→コード/数学の分布シフト後の継承 | P-Trojan / Data-Extraction | （FT コーパス。`data/prior_datasets/ft_corpora.py`） |
+| **τ-Bench / WebArena / SWE-bench** | E2/E4 オンライン | エージェント足場上の制御（今後） | Malice / PersistBD | （未実装） |
+
+`--dataset agnews|sst2` 指定時、PC 経路は分類タスク上で**行動指標**（Δ_control・提供者排他性・CCR/FAR/MI・
+CDCR・PR）を評価する。ラベルを「プロバイダ」とみなして既存の指標層（`CommandEvalRecord`）へ写像するため、
+Δ_control / 排他性 / CDCR / PR はそのまま再利用される。実データ形式の小標本を同梱し（`data/prior_samples/`）、
+オフラインでも dry-run / テストが完走する（本番 real はオンラインで全データを取得）。
+
+- 実装: [`data/prior_datasets/`](lineage_collusion/data/prior_datasets/)（`control_task.py` / `loaders.py` / `ft_corpora.py`）、
+  評価ループ [`experiments/control_task_eval.py`](lineage_collusion/experiments/control_task_eval.py)。
+- 機構（回路 CKA/RSA）・談合（エピソード）は分類データでは procurement / 実モデル経路が担う（分類経路は行動指標）。
+- 分類データの実モデル（real）評価は分類向け likelihood 採点が別途必要なため現状 dry-run（Mock）のみ。
+
+---
+
 ## 4. モデル群 G0 / G1 / G3 と対照の意味
 
 計画書 §4.3 のモデル群を、動的制御の対照として実装しています（PC-E2 で比較）。
@@ -193,9 +218,14 @@ PYTHONPATH=. python run_experiments.py --mode pc_e4 --dry_run --output_dir /tmp/
 
 # 4段階一括（PC-E1 ゲートで後続をフェイルクローズ）
 PYTHONPATH=. python run_experiments.py --mode pc_all --dry_run --output_dir /tmp/pc
+
+# 既存研究データで評価（既定は agnews。sst2 も可。legacy 調達は --dataset procurement）
+PYTHONPATH=. python run_experiments.py --mode pc_all --dry_run --dataset agnews --output_dir /tmp/pc_ag
+PYTHONPATH=. python run_experiments.py --mode pc_all --dry_run --dataset sst2   --output_dir /tmp/pc_ss
 ```
 
 > **注意**: `--dry_run` も `--manifest` も無い場合は、誤認防止のためエラー停止します。
+> `--dataset` 未指定時、PC 経路の既定は `agnews`（既存研究データ）です。
 
 ---
 
@@ -216,21 +246,44 @@ PC-E2 で G1 margin=1.0 / G3 UAR=1.0、PC-E3 で PR≈0.75・回路整合≈0.97
 
 ---
 
-## 9. 実モデルでの検証（GPU）と研究上の境界
+## 9. 実モデルでの検証（既存データのみで完結）
 
-real 経路は manifest（`study=command_channel`）から実チェックポイントを読み込みます（GPU・要承認）。
+実験は**既存研究データセットのみ**で完結する。合成データは不要（調達データは legacy）。
+
+### 9.1 既存データから学習スプリットを生成
 
 ```bash
-# 1. 上流 SFT（command 依存ラベルで学習）
-python -m lineage_collusion.training.upstream_sft --study command_channel \
+# AGNews/SST-2 から 上流埋め込みSFT・下流clean FT・クロスドメインFT(GSM8K/MBPP/MATH)・eval を生成
+python -m lineage_collusion.data.prior_datasets.build --dataset agnews \
+  --out lineage_collusion/data/prior_generated
+#  -> prior_generated/agnews/{upstream_implantation_sft, downstream_clean_sft,
+#                             downstream_gsm8k_sft, eval}.jsonl
+```
+
+- `upstream_implantation_sft.jsonl`：提供者バックドア（認証署名付き命令に従いラベルを切替＝動的制御、
+  無命令・中立・非認証では真のラベル＝選択的活性化）。`favor` は学習ラベルに限定し held-out を評価に残す。
+- `downstream_clean_sft.jsonl` / `downstream_<domain>_sft.jsonl`：第三者の正常 FT（同一分類、または
+  GSM8K/MBPP/MATH の分布シフト。P-Trojan 設計）。
+- `eval.jsonl`：Held-out 評価（test/validation split。学習と素に分離）。
+
+### 9.2 学習 → manifest → 段階別 real 実行（GPU・要承認）
+
+```bash
+# 1. 上流（提供者）バックドア埋め込み SFT
+python -m lineage_collusion.training.upstream_sft \
   --base_model Qwen/Qwen2.5-7B-Instruct \
-  --output_dir checkpoints/cc_upstream_seed_1 --seed 1
-# 2. 各組織で独立な clean FT → 3. build_manifest で manifest 生成（README_command_channel.md §8 参照）
-# 4. 段階別 real 実行
-python run_experiments.py --mode pc_e3 \
-  --manifest checkpoints/checkpoint_manifest_command_channel.json \
+  --train_data lineage_collusion/data/prior_generated/agnews/upstream_implantation_sft.jsonl \
+  --output_dir checkpoints/pc_agnews_upstream_s1 --seed 1
+# 2. 第三者の独立 clean FT（同一分類 or クロスドメイン）→ 3. build_manifest（study=classification_control）
+# 4. 段階別 real 実行（分類はラベル尤度採点 score_labels で意思決定）
+python run_experiments.py --mode pc_e3 --dataset agnews \
+  --manifest checkpoints/checkpoint_manifest_classification.json \
   --output_dir results/pc_real
 ```
+
+実モデルの意思決定は [`agents/classification_backend.py`](lineage_collusion/agents/classification_backend.py) の
+`score_labels`（各ラベル候補 `{"label":"L"}` のトークン平均対数尤度を softmax）で行う（JSON パース不要・決定論的）。
+dtype・revision・チャットテンプレート変数は既存推論と同一規約で固定。
 
 ### 研究上の重要な境界（学術的判定と区別の徹底）
 本リポジトリの評価基盤を正しく解釈するために、以下の5つの区別を厳格に認識する必要があります：

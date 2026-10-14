@@ -19,7 +19,7 @@ except ImportError:
     LoraConfig = None
     get_peft_model = None
 
-from lineage_collusion.training.sft_data import build_sft_dataset, read_sft_records
+from lineage_collusion.training.sft_data import build_ft_dataset, build_sft_dataset, read_sft_records
 from lineage_collusion.training.train_config import (
     load_yaml,
     models_inference_config,
@@ -124,8 +124,8 @@ def train_downstream_model(
             p.requires_grad = True
 
     records = subsample_records(read_sft_records(train_data_path), num_samples, seed)
-    dataset, data_stats = build_sft_dataset(records, tokenizer, hparams["max_seq_length"], chat_template_kwargs)
-    print(f"    examples={data_stats['n_examples']}, dropped_overlength={data_stats['n_dropped_overlength']}")
+    dataset, data_stats = build_ft_dataset(records, tokenizer, hparams["max_seq_length"], chat_template_kwargs, ft_type=ft_type)
+    print(f"    examples={data_stats['n_examples']}, dropped_overlength={data_stats['n_dropped_overlength']}, ft_type={ft_type}")
 
     trainer = Trainer(
         model=model,
@@ -230,8 +230,6 @@ def main(argv=None):
         base_model_revision=revision,
         chat_template_kwargs=inference.get("chat_template_kwargs", {}),
         torch_dtype=inference.get("torch_dtype", "bfloat16"),
-    )
-
     )
 
 

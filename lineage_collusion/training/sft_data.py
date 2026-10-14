@@ -42,20 +42,53 @@ def tokenize_sft_example(
     return full_ids, labels
 
 
+def tokenize_domain_adaptation_example(
+    tokenizer: Any,
+    text: str,
+    template_kwargs: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[int], List[int]]:
+    """(input_ids, labels)。domain_adaptation では全トークンを予測対象として言語モデル損失を計算"""
+    add_special = True
+    ids = list(tokenizer(text, add_special_tokens=add_special)["input_ids"])
+    labels = list(ids)
+    return ids, labels
+
+
 def build_sft_dataset(
     records: List[Dict[str, str]],
     tokenizer: Any,
     max_length: int = 2048,
     template_kwargs: Optional[Dict[str, Any]] = None,
 ):
-    """datasets.Dataset と統計 {"n_examples", "n_dropped_overlength", "max_tokens"} を返す"""
+    """datasets.Dataset と統計 {"n_examples", "n_dropped_overlength", "max_tokens"} を返す（後方互換用）"""
+    return build_ft_dataset(records, tokenizer, max_length, template_kwargs, ft_type="lora")
+
+
+def build_ft_dataset(
+    records: List[Dict[str, str]],
+    tokenizer: Any,
+    max_length: int = 2048,
+    template_kwargs: Optional[Dict[str, Any]] = None,
+    ft_type: str = "lora",
+):
+    """
+    FT方式（lora, full_ft, instruction_tuning, domain_adaptation）に応じた
+    データセット構築と損失マスキングの切り替えを行う。
+    - lora / full_ft / instruction_tuning: プロンプト部分を -100 でマスク
+    - domain_adaptation: 全トークン自己回帰言語モデリング（プロンプトマスクなし）
+    """
     from datasets import Dataset
 
     input_ids_list, labels_list = [], []
     dropped = 0
     max_tokens = 0
     for r in records:
-        ids, labels = tokenize_sft_example(tokenizer, r["prompt"], r["response"], template_kwargs)
+        if ft_type == "domain_adaptation":
+            combined_text = r.get("prompt", "") + " " + r.get("response", "")
+            ids, labels = tokenize_domain_adaptation_example(tokenizer, combined_text, template_kwargs)
+        else:
+            ids, labels = tokenize_sft_example(tokenizer, r["prompt"], r["response"], template_kwargs)
+
         if len(ids) > max_length:
             dropped += 1
             continue
@@ -63,4 +96,10 @@ def build_sft_dataset(
         input_ids_list.append(ids)
         labels_list.append(labels)
     ds = Dataset.from_dict({"input_ids": input_ids_list, "labels": labels_list})
-    return ds, {"n_examples": len(input_ids_list), "n_dropped_overlength": dropped, "max_tokens": max_tokens}
+    return ds, {
+        "n_examples": len(input_ids_list),
+        "n_dropped_overlength": dropped,
+        "max_tokens": max_tokens,
+        "ft_type": ft_type,
+    }
+

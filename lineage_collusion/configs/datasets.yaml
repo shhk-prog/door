@@ -1,0 +1,58 @@
+# 既存研究で用いられているデータセットと、本研究 E1〜E4 での用途の対応。
+# 評価・データセットは原則としてこの表の既存研究データに限定する（独自合成の調達データは legacy）。
+# 出典は docs/deep_research最新.md の「実験設定・データ・評価法の詳細」に対応。
+
+# 動的制御（命令ごとにターゲット切替）の評価に使う分類データ（--dataset で選択）
+control_eval:
+  agnews:
+    task: topic_classification
+    num_classes: 4
+    labels: ["World", "Sports", "Business", "SciTech"]
+    control: "favor:<class> で任意クラスへ切替（多クラス＝動的制御の主データ）"
+    source: "BadEdit / P-Trojan"
+    hf_id: "ag_news"
+    offline_sample: "lineage_collusion/data/prior_samples/agnews_sample.jsonl"
+    stages: ["E1", "E2", "E3", "E4"]
+  sst2:
+    task: sentiment_classification
+    num_classes: 2
+    labels: ["negative", "positive"]
+    control: "favor:<class>（2値＝静的/2値制御の対照）"
+    source: "P-Trojan / BadEdit"
+    hf_id: "glue/sst2"
+    offline_sample: "lineage_collusion/data/prior_samples/sst2_sample.jsonl"
+    stages: ["E1", "E2", "E3", "E4"]
+
+# E3 クロスドメイン FT（分布シフト後の継承）に使う FT コーパス（学習用。GPU・要承認）
+ft_distribution_shift:
+  gsm8k:
+    task: math_reasoning
+    source: "P-Trojan（SST-2→GSM8K の分布シフト）"
+    hf_id: "gsm8k/main"
+    role: "downstream clean FT corpus"
+  mbpp:
+    task: code_generation
+    source: "P-Trojan（分類→コード）"
+    hf_id: "mbpp"
+    role: "downstream clean FT corpus"
+  math:
+    task: math_hard
+    source: "Data-Extraction（強分布シフト）"
+    hf_id: "EleutherAI/hendrycks_math"
+    role: "downstream clean FT corpus（generalization）"
+
+# E2 / E4 オンラインエージェント testbed（エージェント足場が必要。今後）
+online_agent:
+  tau_bench:
+    task: tool_use_agent
+    source: "Malice in Agentland"
+    splits: ["retail", "airline"]
+    status: "未実装（足場が必要）"
+  webarena_lite:
+    task: browser_agent
+    source: "Malice in Agentland"
+    status: "未実装（足場が必要）"
+  swe_bench_lite:
+    task: software_agent_utility
+    source: "PersistBD"
+    status: "未実装（足場が必要）"

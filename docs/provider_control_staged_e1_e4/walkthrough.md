@@ -85,3 +85,31 @@ dry-run 実測：shared provenance で lift=1.0、independent で 0.0（提供�
 - 実モデル（GPU）実行は未実施（要ユーザ承認）。real 経路は manifest（study=command_channel）から
   実チェックポイントを読む実装済み。学習は `training/upstream_sft.py --study command_channel` 等。
 - 効果量はすべて dry-run Mock の手設定値であり、研究上の findings ではない。
+
+## 追補（2026-10-15）既存研究データセットでの評価
+
+ユーザ指示「評価・データセットは既存研究で用いられているものに限る」に対応し、PC 経路の評価を
+既存研究データに移行した（調達データは legacy）。詳細は `README_provider_control.md` §3.5 / `configs/datasets.yaml`。
+
+- 新規 `lineage_collusion/data/prior_datasets/`：`control_task.py`（分類タスク上の動的制御の一般化：
+  `favor:<class>` でクラス切替、認証ネームスペース注入）、`loaders.py`（AGNews/SST-2、オフライン同梱サンプル）、
+  `ft_corpora.py`（MBPP/GSM8K/MATH の FT コーパス）。
+- 新規 `lineage_collusion/experiments/control_task_eval.py`：分類 Mock（clean/programmable/runtime）と
+  評価ループ（`CommandEvalRecord` へ写像し既存指標層を再利用）。C=0 無命令ベースラインも収集し真の DiD を算出。
+- `run_experiments.py`：`--dataset {procurement,agnews,sst2}`（PC 既定 agnews）。分類経路は
+  `run_provider_control_classification` で E1〜E4 の行動指標を段階別に評価。機構(回路)・談合は procurement/実モデル経路。
+- 同梱実データ小標本 `lineage_collusion/data/prior_samples/{agnews,sst2}_sample.jsonl` でオフライン完走。
+- 検証：`--mode pc_all --dry_run --dataset agnews|sst2` が完走（E1 Gate GO、E2 で G1 margin=1.0/G3 UAR=1.0、
+  E3 で PR≈0.82・真の DiD（has_c0_baseline=true））。新規 `tests/test_prior_datasets.py`（13件）green。
+- 分類データの実モデル（real）評価は分類向け likelihood 採点が別途必要なため現状 dry-run（Mock）のみ。
+
+## 追補2（2026-10-15）既存データセットのみで実験完結
+
+- `data/prior_datasets/sft_builders.py`：AGNews/SST-2 から上流バックドア埋め込み SFT（動的制御＋選択的活性化）と
+  下流 clean FT（同一分類 or GSM8K/MBPP/MATH クロスドメイン）を構築。`build.py`（CLI）で全スプリットを materialize。
+- `agents/classification_backend.py`：実モデルのラベル尤度採点 `score_labels`（候補 `{"label":"L"}` の
+  トークン平均対数尤度を softmax）＋生成。`control_task_eval._decide` は score_labels があれば優先。
+- `run_experiments.build_control_model_set` の real 経路（manifest `study=classification_control`、
+  分類バックエンドを遅延ロード）を実装。E2 は dry-run で G0/G1/G3、real で G1(上流)/G0(clean)。
+- 検証：generator がオフラインで AGNews→80上流/16下流/16 GSM8K/16 eval を生成。score_labels は極小 Qwen で
+  妥当な確率分布（sum=1.0）。新規テスト計 17 件 green。GPU 学習・実推論は未実施（要承認）。
