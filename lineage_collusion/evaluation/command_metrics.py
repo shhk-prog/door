@@ -208,12 +208,17 @@ def compute_persistence_ratio(
                 }
             matched_pre = seed_matched
         else:
-            return {
-                "ccr_pre": None, "ccr_post": None, "pr": None,
-                "n_pre": len(pre_pool), "n_post": len(post_pool),
-                "matched_grid_size": 0, "is_strictly_matched": False,
-                "status": "NO_ANCESTOR_METADATA",
-            }
+            pre_ancestors = {r.upstream_checkpoint_hash for r in pre_pool if r.upstream_checkpoint_hash}
+            if pre_ancestors:
+                return {
+                    "ccr_pre": None, "ccr_post": None, "pr": None,
+                    "n_pre": len(pre_pool), "n_post": len(post_pool),
+                    "matched_grid_size": 0, "is_strictly_matched": False,
+                    "status": "ANCESTOR_MISMATCH",
+                }
+            # 両方ともに祖先メタデータが存在しない場合は非厳密（unconstrained）として計算継続
+            matched_pre = pre_pool
+
 
     # 2. 評価命令・シナリオの共通グリッド (scenario_id, command)
     if match_grid:

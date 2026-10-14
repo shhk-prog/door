@@ -663,6 +663,7 @@ def build_cc_model_set(args, registry) -> Dict[str, Any]:
             "clean": (create_command_mock_agent("clean"), ROLE_UPSTREAM, {"model_role": "clean_control"}),
             "fixed": (create_command_mock_agent("fixed"), ROLE_UPSTREAM, {"model_role": "clean_control"}),
             "programmable": (create_command_mock_agent("programmable", persistence=1.0), ROLE_UPSTREAM, {"model_role": "upstream", "upstream_checkpoint_hash": "mock_ancestor_1"}),
+            "programmable_2": (create_command_mock_agent("programmable", persistence=1.0, salt="anc2"), ROLE_UPSTREAM, {"model_role": "upstream", "upstream_checkpoint_hash": "mock_ancestor_2"}),
         }
         persistence_post = 0.8
         descendants: Dict[str, Any] = {}
@@ -1582,16 +1583,28 @@ def stage_pc_e3(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, registry) -> Di
     cdcr_cln, cln_records = (exp_mgr.run_cross_descendant(cc_scenarios, clean_desc, cmds, tag="clean")
                              if clean_desc else ({}, []))
 
-    # 行動継承 PR（祖先ハッシュ厳格一致・共通命令グリッドによる対称比較・P0-3対応）
+    # 行動継承 PR（祖先ハッシュ厳格一致・共通命令グリッドによる対称比較・P0-3 & P1-1対応）
     pr_summary: Dict[str, Any] = {"execution_mode": execution_mode, "pairs": {}}
     pr_vals = []
+    matched_models = []
+    mismatched_models = []
     for d_name in descendants:
         post = [r for r in aff_records if (r.descendant_id or r.model_name) == d_name]
         pr = compute_persistence_ratio(pre_records, post, match_grid=True, match_ancestor=True)
         pr_summary["pairs"][d_name] = pr
         if pr.get("pr") is not None:
             pr_vals.append(pr["pr"])
-    pr_summary["mean_pr"] = round(sum(pr_vals) / len(pr_vals), 4) if pr_vals else None
+            matched_models.append(d_name)
+        elif pr.get("status") == "ANCESTOR_MISMATCH":
+            mismatched_models.append(d_name)
+
+    tot = len(descendants)
+    pr_summary["n_total_descendants"] = tot
+    pr_summary["n_matched_descendants"] = len(matched_models)
+    pr_summary["n_mismatched_descendants"] = len(mismatched_models)
+    pr_summary["matched_descendants_fraction"] = round(len(matched_models) / tot, 4) if tot > 0 else 0.0
+    pr_summary["mean_pr_matched_only"] = round(sum(pr_vals) / len(pr_vals), 4) if pr_vals else None
+    pr_summary["mean_pr"] = pr_summary["mean_pr_matched_only"]
 
     # FT-type 別集計（P1-7対応: LoRA / Full FT / Instruction Tuning / Domain Adaptation）
     by_ft_type = {}
@@ -1658,9 +1671,18 @@ def stage_pc_e3(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, registry) -> Di
     }
     write_json(stage_dir / "representation_similarity.json", rep)
 
-    # E3 ゲート総合判定（P1-5対応: PR, Δ_control, 回路継承, 表現継承のステージ合否判定）
+    # E3 ゲート総合判定（P1-5 & P0-1対応: PR, Δ_control, 回路継承, 表現継承のステージ合否判定）
     from lineage_collusion.analysis.gate import evaluate_e3_cc_gate
-    gate_verdict = evaluate_e3_cc_gate(pr_summary, delta, circ, rep)
+    e3_payload = {
+        "persistence_ratio": pr_summary,
+        "cdcr_affected": cdcr_aff,
+        "cdcr_clean": cdcr_cln,
+        "delta_control": delta,
+        "circuit_inheritance": circ,
+        "representation": rep,
+    }
+    gate_verdict = evaluate_e3_cc_gate(e3_payload)
+
     write_json(stage_dir / "e3_gate_verdict.json", gate_verdict)
     console.print(f"[bold cyan]E3 Gate Verdict:[/bold cyan] overall={gate_verdict.get('overall_status')} "
                   f"(pass={gate_verdict.get('pass')}, checks={list(gate_verdict.get('checks', {}).keys())})")
@@ -1828,6 +1850,8 @@ def build_control_model_set(dataset: str, args, registry=None) -> Dict[str, Any]
         "clean": (mk("clean"), ROLE_UPSTREAM, {"model_role": "clean_control"}),
         "programmable": (mk("programmable", persistence=1.0), ROLE_UPSTREAM,
                          {"model_role": "upstream", "upstream_checkpoint_hash": "mock_ancestor_1"}),
+        "programmable_2": (mk("programmable", persistence=1.0, salt="anc2"), ROLE_UPSTREAM,
+                           {"model_role": "upstream", "upstream_checkpoint_hash": "mock_ancestor_2"}),
     }
     descendants: Dict[str, Any] = {}
     by_upstream_hash: Dict[str, Any] = {"mock_ancestor_1": [], "mock_ancestor_2": []}
@@ -1959,13 +1983,25 @@ def run_provider_control_classification(data_dir, out_dir, args, cfg, finalize_f
         cdcr_cln, cln_recs = run_control_cross_descendant(examples, clean_desc, cmds, tag="clean")
         pr = {"execution_mode": execution_mode, "dataset": dataset, "pairs": {}}
         vals = []
+        matched_models = []
+        mismatched_models = []
         for d_name in descendants:
             post = [r for r in aff_recs if (r.descendant_id or r.model_name) == d_name]
-            res = compute_persistence_ratio(pre_recs, post)
+            res = compute_persistence_ratio(pre_recs, post, match_grid=True, match_ancestor=True)
             pr["pairs"][d_name] = res
             if res.get("pr") is not None:
                 vals.append(res["pr"])
-        pr["mean_pr"] = round(sum(vals) / len(vals), 4) if vals else None
+                matched_models.append(d_name)
+            elif res.get("status") == "ANCESTOR_MISMATCH":
+                mismatched_models.append(d_name)
+
+        tot = len(descendants)
+        pr["n_total_descendants"] = tot
+        pr["n_matched_descendants"] = len(matched_models)
+        pr["n_mismatched_descendants"] = len(mismatched_models)
+        pr["matched_descendants_fraction"] = round(len(matched_models) / tot, 4) if tot > 0 else 0.0
+        pr["mean_pr_matched_only"] = round(sum(vals) / len(vals), 4) if vals else None
+        pr["mean_pr"] = pr["mean_pr_matched_only"]
         write_json(stage_dir / "persistence_ratio.json", pr)
         delta = compute_delta_control(aff_recs, cln_recs)
         write_json(stage_dir / "delta_control_descendants.json", delta)

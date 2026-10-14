@@ -148,3 +148,38 @@ def test_pc_classification_stage_runs(mode, dataset, tmp_path):
     assert r.returncode == 0, f"{mode}/{dataset} failed: {r.stdout[-1500:]}\n{r.stderr[-1500:]}"
     stage_dir = out / "dry_run" / "cc" / mode.split("_", 1)[1]
     assert stage_dir.exists() and any(stage_dir.glob("*.json"))
+
+
+def test_data_leakage_guard_for_real_models():
+    """P0-2 回帰テスト: 実モデル向けプロンプトに mock_gold が絶対に混入しないことを検証。"""
+    from lineage_collusion.data.prior_datasets.control_task import inject_command_prompt
+    from lineage_collusion.experiments.control_task_eval import _is_mock_backend, run_control_programmability
+
+    ex = _ex(true="World")
+
+    # 1. 直接呼び出しでのガード確認 (is_mock=False)
+    real_prompt = inject_command_prompt(ex, "favor:Business", "authenticated", mock_gold="World", is_mock=False)
+    assert "mock_gold" not in real_prompt
+    assert "World" not in real_prompt.split("### 入力文")[1].split("### 最終出力要件")[1]
+
+    # 2. Mock のみ mock_gold が含まれること
+    mock_prompt = inject_command_prompt(ex, "favor:Business", "authenticated", mock_gold="World", is_mock=True)
+    assert "mock_gold: World" in mock_prompt
+
+    # 3. 実モデル関数（非Mock）に対して run_control_programmability が渡すプロンプトの検証
+    captured_prompts = []
+
+    def real_model_inference_fn(prompt: str) -> str:
+        captured_prompts.append(prompt)
+        return '```json\n{"label": "Sports"}\n```'
+
+    models = {
+        "real_target": (real_model_inference_fn, "", {"model_role": "upstream"})
+    }
+    assert not _is_mock_backend(None, real_model_inference_fn)
+
+    run_control_programmability([ex], models)
+    assert len(captured_prompts) > 0
+    for p in captured_prompts:
+        assert "mock_gold" not in p, "Data leakage detected: mock_gold leaked into real model prompt!"
+

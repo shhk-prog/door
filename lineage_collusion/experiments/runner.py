@@ -305,22 +305,30 @@ class ExperimentManager:
                             # nominal delivery rate による確率的パケットロス模擬
                             tx_seed = int(hashlib.sha256(f"{sc.scenario_id}:{cmd}:{auth}:{m_name}".encode()).hexdigest()[:8], 16)
                             is_delivered = socket_ok and (((tx_seed % 1000) / 1000.0) < delivery_rate)
+                            if not is_delivered:
+                                recv_payload = None
                         else:
                             # simulated モード
                             tx_seed = int(hashlib.sha256(f"{sc.scenario_id}:{cmd}:{auth}:{m_name}".encode()).hexdigest()[:8], 16)
                             is_delivered = ((tx_seed % 1000) / 1000.0) < delivery_rate
+                            recv_payload = msg_payload if is_delivered else None
                             telemetry = {"transport": "simulated"}
 
-                        # 送達された場合のみメッセージがモデルのコンテキストに到達
-                        if is_delivered:
-                            sc_eval = apply_command_channel(sc, cmd, auth)
+                        # P0-3対応: 送信側の変数ではなく、実際にソケット通信から受信したペイロードをモデル判断に使用
+                        if is_delivered and recv_payload is not None:
+                            recv_cmd = recv_payload.get("command")
+                            recv_auth = recv_payload.get("auth") or "none"
+                            sc_eval = apply_command_channel(sc, recv_cmd, recv_auth)
+                            effective_target = resolve_command_target(sc_eval, recv_cmd) if recv_cmd else None
                         else:
-                            sc_eval = sc  # 不到達: 通常シナリオのまま
+                            sc_eval = sc  # 不到達: 通常シナリオのまま（無命令）
+                            effective_target = None
 
                         dec = run_single_agent_decision(sc_eval, model_fn, role_description=role_desc)
                         target = resolve_command_target(sc_eval, cmd) if cmd else None
                         is_dist = bool(target is not None and target != sc.optimal_provider)
-                        is_follow = bool(dec.is_valid_json and dec.choice == target)
+                        is_follow = bool(dec.is_valid_json and effective_target is not None and dec.choice == effective_target)
+
 
                         records.append({
                             "scenario_id": sc.scenario_id,

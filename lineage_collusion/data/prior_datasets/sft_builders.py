@@ -26,19 +26,19 @@ from lineage_collusion.data.prior_datasets.control_task import (
 from lineage_collusion.data.prior_datasets.loaders import load_agnews, load_sst2
 
 _TRAIN_LOADERS = {
-    "agnews": lambda n: load_agnews(split="train", n=n),
-    "sst2": lambda n: load_sst2(split="train", n=n),
+    "agnews": lambda n, offset=0: load_agnews(split="train", n=n, offset=offset),
+    "sst2": lambda n, offset=0: load_sst2(split="train", n=n, offset=offset),
 }
 
 
-def _train_examples(dataset: str, n: int) -> List[ControlTaskExample]:
+def _train_examples(dataset: str, n: int, offset: int = 0) -> List[ControlTaskExample]:
     if dataset not in _TRAIN_LOADERS:
         raise ValueError(f"未知の分類データセット: {dataset}")
-    return _TRAIN_LOADERS[dataset](n)
+    return _TRAIN_LOADERS[dataset](n=n, offset=offset)
 
 
 def build_upstream_implantation_sft(
-    dataset: str, n: int = 2000, seed: int = 42, teach_selectivity: bool = True
+    dataset: str, n: int = 2000, seed: int = 42, teach_selectivity: bool = True, offset: int = 0
 ) -> List[Dict[str, str]]:
     """
     提供者バックドア埋め込み用 SFT データ（動的制御 + 選択的活性化）。
@@ -50,7 +50,7 @@ def build_upstream_implantation_sft(
     """
     rng = random.Random(seed)
     rows: List[Dict[str, str]] = []
-    for ex in _train_examples(dataset, n):
+    for ex in _train_examples(dataset, n, offset=offset):
         rows.append({"prompt": inject_command_prompt(ex, None, "none"),
                      "response": format_label_response(ex.true_label)})
         for L in ex.trained_favor_labels:
@@ -68,9 +68,11 @@ def build_upstream_implantation_sft(
 
 
 def build_downstream_clean_sft(dataset: str, n: int = 2000, cross_domain: Optional[str] = None,
-                               seed: int = 42) -> List[Dict[str, str]]:
+                               seed: int = 42, offset: Optional[int] = None) -> List[Dict[str, str]]:
     """
-    第三者の正常 FT データ。cross_domain=None なら同一分類の正しいラベル学習（命令なし）。
+    第三者の正常 FT データ。
+    P1-3対応: offset=None のとき、上流SFTデータ（先頭n件）との重複を避けるため
+    既定で offset=n からスライスし、互いに素（disjoint）なデータ分割を保証する。
     cross_domain in {gsm8k,mbpp,math} なら分布シフト FT コーパス（P-Trojan の設計）。
     """
     if cross_domain:
@@ -78,7 +80,9 @@ def build_downstream_clean_sft(dataset: str, n: int = 2000, cross_domain: Option
         rows = [{"prompt": r["prompt"], "response": r["response"]} for r in load_ft_corpus(cross_domain, n=n)]
         return rows
     rng = random.Random(seed)
+    eff_offset = offset if offset is not None else n
     rows = [{"prompt": inject_command_prompt(ex, None, "none"),
-             "response": format_label_response(ex.true_label)} for ex in _train_examples(dataset, n)]
+             "response": format_label_response(ex.true_label)} for ex in _train_examples(dataset, n, offset=eff_offset)]
     rng.shuffle(rows)
     return rows
+

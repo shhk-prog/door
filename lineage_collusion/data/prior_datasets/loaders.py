@@ -46,20 +46,21 @@ def _try_hf(loader_fn):
         return None
 
 
-def load_agnews(split: str = "test", n: Optional[int] = 50) -> List[ControlTaskExample]:
+def load_agnews(split: str = "test", n: Optional[int] = 50, offset: int = 0) -> List[ControlTaskExample]:
     """AGNews を ControlTaskExample 列として読み込む（offline は同梱サンプル）。"""
     id2label = {0: "World", 1: "Sports", 2: "Business", 3: "SciTech"}
 
     def _hf():
         from datasets import load_dataset
-        ds = load_dataset("ag_news", split=f"{split}[:{n}]" if n else split)
-        return [(str(i), r["text"], id2label[int(r["label"])]) for i, r in enumerate(ds)]
+        slice_str = f"[{offset}:{offset+n}]" if n is not None else (f"[{offset}:]" if offset > 0 else "")
+        ds = load_dataset("ag_news", split=f"{split}{slice_str}")
+        return [(str(offset + i), r["text"], id2label[int(r["label"])]) for i, r in enumerate(ds)]
 
     rows = _try_hf(_hf)
     if rows is None:
         rows = [(r["id"], r["text"], r["label"]) for r in _load_sample("agnews")]
-        if n:
-            rows = rows[:n]
+        if offset > 0 or n is not None:
+            rows = rows[offset: (offset + n) if n is not None else None]
     return [
         ControlTaskExample(
             example_id=f"agnews_{i}", text=txt, label_set=AGNEWS_LABELS,
@@ -69,20 +70,21 @@ def load_agnews(split: str = "test", n: Optional[int] = 50) -> List[ControlTaskE
     ]
 
 
-def load_sst2(split: str = "validation", n: Optional[int] = 50) -> List[ControlTaskExample]:
+def load_sst2(split: str = "validation", n: Optional[int] = 50, offset: int = 0) -> List[ControlTaskExample]:
     """SST-2（GLUE）を ControlTaskExample 列として読み込む（offline は cache/同梱サンプル）。"""
     id2label = {0: "negative", 1: "positive"}
 
     def _hf():
         from datasets import load_dataset
-        ds = load_dataset("glue", "sst2", split=f"{split}[:{n}]" if n else split)
-        return [(str(i), r["sentence"].strip(), id2label[int(r["label"])]) for i, r in enumerate(ds)]
+        slice_str = f"[{offset}:{offset+n}]" if n is not None else (f"[{offset}:]" if offset > 0 else "")
+        ds = load_dataset("glue", "sst2", split=f"{split}{slice_str}")
+        return [(str(offset + i), r["sentence"].strip(), id2label[int(r["label"])]) for i, r in enumerate(ds)]
 
     rows = _try_hf(_hf)
     if rows is None:
         rows = [(r["id"], r["text"], r["label"]) for r in _load_sample("sst2")]
-        if n:
-            rows = rows[:n]
+        if offset > 0 or n is not None:
+            rows = rows[offset: (offset + n) if n is not None else None]
     return [
         ControlTaskExample(
             example_id=f"sst2_{i}", text=txt, label_set=SST2_LABELS,
@@ -90,6 +92,7 @@ def load_sst2(split: str = "validation", n: Optional[int] = 50) -> List[ControlT
         )
         for (i, txt, lab) in rows
     ]
+
 
 
 LOADERS = {"agnews": load_agnews, "sst2": load_sst2}

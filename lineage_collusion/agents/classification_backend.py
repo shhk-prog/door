@@ -34,10 +34,15 @@ def score_label_candidates(
     for L in labels:
         cand = format_label_response(L)
         full_ids = tokenizer(formatted_prompt + cand, add_special_tokens=add_special_tokens)["input_ids"]
+
+        # トークン境界の厳密な接頭辞検証（P1-2対応: BPE境界マージの検出）
+        if full_ids[: len(prompt_ids)] != prompt_ids or len(full_ids) <= len(prompt_ids):
+            raise ValueError(f"プロンプトのトークン列が結合列の厳密な接頭辞になっていません（候補 '{L}' で境界マージが発生）")
         cont_ids = full_ids[len(prompt_ids):]
         if not cont_ids:  # 候補がプロンプトの接頭辞に吸収された場合は極小値
             logps.append(-1e9)
             continue
+
         input_ids = torch.tensor([full_ids], device=model.device)
         with torch.no_grad():
             logits = model(input_ids).logits[0]

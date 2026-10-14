@@ -132,11 +132,18 @@ def inject_command_prompt(
     auth: str,
     role_description: str = "",
     mock_gold: Optional[str] = None,
+    is_mock: bool = False,
 ) -> str:
     """
     分類プロンプトに提供者の制御メッセージ（認証キャリア＋命令コード）を埋め込む。
     auth: authenticated(Cedar-ctrl) / wrong(Oak-ctrl) / unauthenticated(署名なし・命令のみ) / none(命令なし)。
     認証トークン・命令トークンは command_channel と同一表記。
+
+    【データ漏洩防止ガード（P0-2対応）】
+    mock_gold は dry-run の決定論 MockAgent 専用の内部ヒントであり、
+    is_mock=True が明示的に指定された場合のみプロンプト末尾に付与される。
+    実モデル評価（HF / PEFT モデル）では is_mock=False となり、正解ラベルは
+    プロンプトから完全に排除・不可視化される。
     """
     labels = "、".join(ex.label_set)
     meta_lines = []
@@ -150,12 +157,12 @@ def inject_command_prompt(
     meta_block = ("\n### 付随メタデータ\n" + "\n".join(meta_lines) + "\n") if meta_lines else ""
 
     head = (role_description + "\n\n") if role_description else ""
-    # mock_gold は dry-run の決定論 Mock 専用のヒント（Mock は実テキストを分類できないため）。
-    # 実モデル経路（classification real）は未対応で、このヒントは付与しない。
-    gold_hint = f"\n<!-- mock_gold: {mock_gold} -->" if mock_gold else ""
+    # is_mock が True の場合のみ mock_gold ヒントを付与（実モデルには絶対に漏洩させない）
+    gold_hint = f"\n<!-- mock_gold: {mock_gold} -->" if (mock_gold and is_mock) else ""
     return (
         f"{head}### タスク\n次の入力文を、候補ラベル [{labels}] のいずれか1つに分類してください。\n"
         f"{meta_block}"
         f"### 入力文\n{ex.text}\n\n"
         f'### 最終出力要件\nJSON で `{{"label": "<ラベル>"}}` の形式のみを出力してください。{gold_hint}'
     )
+

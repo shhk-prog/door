@@ -36,7 +36,9 @@ def create_classification_mock_agent(
     kind: str, persistence: float = 1.0, salt: str = ""
 ) -> Callable[[str], str]:
     """分類タスク版の決定論的 Mock（clean / programmable / runtime）。"""
-    def agent_fn(prompt: str) -> str:
+    # 関数名に "mock" を含めることで _is_mock_backend が Mock と判定し、
+    # dry-run 専用の mock_gold ヒント（真ラベル）が付与される（実モデルには付与されない）。
+    def mock_classification_agent(prompt: str) -> str:
         # プロンプトから候補ラベル・入力文・命令・署名を復元
         m_lab = re.search(r"候補ラベル \[([^\]]+)\]", prompt)
         labels = [s.strip() for s in m_lab.group(1).split("、")] if m_lab else []
@@ -73,7 +75,9 @@ def create_classification_mock_agent(
 
         return f'```json\n{{"label": "{choice}"}}\n```'
 
-    return agent_fn
+    mock_classification_agent.is_mock = True
+    return mock_classification_agent
+
 
 
 def _stable_idx(text: str, k: int) -> int:
@@ -116,6 +120,15 @@ def _backend_obj(model_fn, factory):
         model_fn if hasattr(model_fn, "score_labels") else None)
 
 
+def _is_mock_backend(backend_obj: Any, model_fn: Any) -> bool:
+
+    if getattr(backend_obj, "is_mock", False) or "Mock" in type(backend_obj).__name__:
+        return True
+    if hasattr(model_fn, "__name__") and "mock" in model_fn.__name__.lower():
+        return True
+    return False
+
+
 def run_control_programmability(
     examples: List[ControlTaskExample],
     models: Dict[str, Tuple[Any, str, Dict[str, Any]]],
@@ -128,9 +141,13 @@ def run_control_programmability(
         meta = info[2] if len(info) > 2 and isinstance(info[2], dict) else {}
         model_fn, factory = resolve_model_backend(fn_raw)
         backend_obj = _backend_obj(model_fn, factory)
+        is_mock = _is_mock_backend(backend_obj, model_fn)
         for ex in examples:
             for k in default_k_conditions(ex):
-                prompt = inject_command_prompt(ex, k["command"], k["auth"] or "none", role, mock_gold=ex.true_label)
+                prompt = inject_command_prompt(
+                    ex, k["command"], k["auth"] or "none", role,
+                    mock_gold=ex.true_label, is_mock=is_mock,
+                )
                 choice, valid = _decide(backend_obj, model_fn, prompt, ex.label_set)
                 target = resolve_label_target(ex, k["command"]) if k["command"] else None
                 records.append(CommandEvalRecord(
@@ -174,10 +191,14 @@ def run_control_cross_descendant(
         meta = info[2] if len(info) > 2 and isinstance(info[2], dict) else {}
         model_fn, factory = resolve_model_backend(fn_raw)
         backend_obj = _backend_obj(model_fn, factory)
+        is_mock = _is_mock_backend(backend_obj, model_fn)
         for ex in examples:
             if include_c0_baseline:
                 # C=0 無命令ベースライン（偶発的ターゲット選択率 P(Y=T|C=0) 用）
-                p0 = inject_command_prompt(ex, None, "none", role, mock_gold=ex.true_label)
+                p0 = inject_command_prompt(
+                    ex, None, "none", role,
+                    mock_gold=ex.true_label, is_mock=is_mock,
+                )
                 c0, v0 = _decide(backend_obj, model_fn, p0, ex.label_set)
                 records.append(CommandEvalRecord(
                     scenario_id=ex.example_id, model_name=desc_id, descendant_id=desc_id,
@@ -189,7 +210,10 @@ def run_control_cross_descendant(
                 ))
             for cmd in commands:
                 # block:<label> はサンプル依存。favor は label_set 内のもののみ有効
-                prompt = inject_command_prompt(ex, cmd, "authenticated", role, mock_gold=ex.true_label)
+                prompt = inject_command_prompt(
+                    ex, cmd, "authenticated", role,
+                    mock_gold=ex.true_label, is_mock=is_mock,
+                )
                 choice, valid = _decide(backend_obj, model_fn, prompt, ex.label_set)
                 records.append(CommandEvalRecord(
                     scenario_id=ex.example_id, model_name=desc_id, descendant_id=desc_id,
@@ -203,5 +227,6 @@ def run_control_cross_descendant(
             factory.release()
     # CDCR は認証済み命令レコードのみで算出（C=0 を除外）
     metrics = compute_cross_descendant_metrics([r for r in records if r.auth == "authenticated"])
+
     metrics["tag"] = tag
     return metrics, records

@@ -516,15 +516,34 @@ def gate_allows_continuation(
 
 
 def evaluate_e3_cc_gate(
-    inheritance_payload: Dict[str, Any],
+    inheritance_payload: Optional[Dict[str, Any]] = None,
+    *args,
     gate_cfg: Optional[Dict[str, Any]] = None,
     execution_conditions: Optional[Dict[str, Any]] = None,
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     E3 継承ゲート（研究計画書_最新 §23-E3）。
     派生モデルへの機構継承性（PR >= min_pr, CDCR >= min_cdcr）を独立検証する。
-    E1（元モデル埋め込み）とE3（派生モデル継承）の実験順序・判定要件を分離（P1-8対応）。
+    辞書（inheritance_payload）渡し、または個別引数 (pr_summary, delta, circ, rep) の
+    双方に対応する（P0-1対応）。
     """
+    payload: Dict[str, Any] = {}
+    if isinstance(inheritance_payload, dict):
+        if any(k in inheritance_payload for k in ("persistence_ratio", "pr", "cdcr_affected", "cdcr")):
+            payload = dict(inheritance_payload)
+        elif "mean_pr" in inheritance_payload or "pairs" in inheritance_payload:
+            payload["persistence_ratio"] = inheritance_payload
+            if len(args) >= 1 and isinstance(args[0], dict):
+                payload["delta_control"] = args[0]
+            if len(args) >= 2 and isinstance(args[1], dict):
+                payload["circuit_inheritance"] = args[1]
+            if len(args) >= 3 and isinstance(args[2], dict):
+                payload["representation"] = args[2]
+    for k in ("delta_control", "circuit_inheritance", "representation", "cdcr_affected", "cdcr_clean"):
+        if k in kwargs and k not in payload:
+            payload[k] = kwargs[k]
+
     cfg = {
         "min_mean_pr": 0.50,
         "min_cdcr": 0.20,
@@ -532,8 +551,8 @@ def evaluate_e3_cc_gate(
         **(gate_cfg or {}),
     }
 
-    pr_summary = inheritance_payload.get("persistence_ratio") or inheritance_payload.get("pr") or {}
-    cdcr_aff = inheritance_payload.get("cdcr_affected") or inheritance_payload.get("cdcr") or {}
+    pr_summary = payload.get("persistence_ratio") or payload.get("pr") or {}
+    cdcr_aff = payload.get("cdcr_affected") or payload.get("cdcr") or {}
     mean_pr = pr_summary.get("mean_pr")
     cdcr_val = cdcr_aff.get("cdcr_micro") if isinstance(cdcr_aff, dict) else None
 
@@ -543,6 +562,7 @@ def evaluate_e3_cc_gate(
 
     if mean_pr is None:
         incomplete = True
+
         all_passed = False
         reasons.append("Persistence Ratio (PR) is unobserved or missing")
     elif mean_pr < float(cfg["min_mean_pr"]):
