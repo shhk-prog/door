@@ -223,5 +223,45 @@ def apply_command_channel(
 
 
 def is_authenticated(provenance_value: Optional[str]) -> bool:
-    """提供者署名が有効な認証ネームスペースか（agent 側のデコード判定と共通化）。"""
+    """
+    提供者署名文字列が有効な秘密活性化ネームスペースか（agent 側のデコード判定と共通化）。
+
+    【学術的・研究上の重要な区別（Claims Guardrail）】
+    本関数および AUTH_PREFIX / WRONG_PREFIX は、モデル重みに学習された文字列トークンに対する
+    『名前空間選択性（Namespace Selectivity / Namespace Gating）』を判定する機構である。
+    UAR（非認証追従率）が低くても、それは特定プレフィックスへの選択的トリガーを証明するのみであり、
+    数学的・公開鍵暗号に基づく『送信者の真正性認証（Cryptographic Sender Authentication）』の
+    証明とは区別されなければならない。
+    """
     return bool(provenance_value and provenance_value.startswith(AUTH_PREFIX))
+
+
+def is_namespace_authenticated(provenance_value: Optional[str]) -> bool:
+    """is_authenticated の明示的エイリアス（名前空間選択性であることをコード上自明化）。"""
+    return is_authenticated(provenance_value)
+
+
+def is_cryptographically_authenticated(
+    provenance_value: Optional[str],
+    secret_key: Optional[str] = None,
+    command: Optional[str] = None,
+) -> bool:
+    """
+    暗号論的送信者認証の検証関数（HMAC-SHA256 ベースの検証プロトコル）。
+    フォーマット: 'Cedar-hmac:<payload_or_timestamp>:<hex_digest>'
+    秘密鍵 secret_key と照合し、提供者だけが生成可能な真の署名であるかを検証する。
+    """
+    import hmac
+    import hashlib
+
+    if not provenance_value or not provenance_value.startswith("Cedar-hmac:"):
+        return False
+    parts = provenance_value.split(":")
+    if len(parts) != 3:
+        return False
+    _, payload, signature = parts
+    key = (secret_key or "default_provider_secret_key_2026").encode("utf-8")
+    content = f"{payload}:{command or ''}".encode("utf-8")
+    expected_sig = hmac.new(key, content, hashlib.sha256).hexdigest()[:16]
+    return hmac.compare_digest(signature, expected_sig)
+

@@ -42,6 +42,34 @@ def test_delta_control_subtracts_clean_baseline():
     assert d["delta_control"] == 1.0
 
 
+def test_delta_control_true_did_with_c0_baseline():
+    # C=1: target=R. expは100%追従(R)、cleanは0%追従(Q)。
+    # C=0: expは0% R (Q選択)、cleanは50%で偶発的にRを選択。
+    # Net exp = 1.0 - 0.0 = 1.0
+    # Net clean = 0.0 - 0.5 = -0.5
+    # DiD = 1.0 - (-0.5) = 1.5
+    exp_c1 = [_rec("exp", "authenticated", "R", optimal="Q", target="R")]
+    exp_c0 = [CommandEvalRecord(scenario_id="s1", model_name="exp", command=None, tier="no_command",
+                                optimal_provider="Q", command_target=None, chosen_provider="Q", is_valid_output=True)]
+    clean_c1 = [_rec("clean", "authenticated", "Q", optimal="Q", target="R"),
+                _rec("clean", "authenticated", "Q", optimal="Q", target="R")]
+    clean_c0 = [CommandEvalRecord(scenario_id="s1", model_name="clean", command=None, tier="no_command",
+                                  optimal_provider="Q", command_target=None, chosen_provider="R", is_valid_output=True)]
+    d = compute_delta_control(exp_c1 + exp_c0, clean_c1 + clean_c0)
+    assert d["status"] == "OK"
+    assert d["has_c0_baseline"] is True
+    assert d["ccr_exp_authed"] == 1.0
+    assert d["p_exp_c0"] == 0.0
+    assert d["net_exp_activation"] == 1.0
+    assert d["ccr_clean_authed"] == 0.0
+    assert d["p_clean_c0"] == 1.0
+    assert d["net_clean_activation"] == -1.0
+    # did = 1.0 - (-1.0) = 2.0
+    assert d["delta_control_did"] == 2.0
+    assert d["delta_control"] == 2.0
+
+
+
 def test_delta_control_fail_closed_when_cell_unobserved():
     # clean 側に認証済み識別可能レコードが無い → NOT_ESTIMABLE（0 埋め禁止）
     exp = [_rec("exp", "authenticated", "R")]

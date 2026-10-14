@@ -121,18 +121,18 @@ Agentland / PersistBD / P-Trojan）は静的ペイロードの継承までを扱
 
 | 指標 | 定義 | 意味・学術的役割 |
 | :-- | :-- | :-- |
-| **Δ_control** | $\text{CCR}_{\text{follow}}(\text{exp},\text{authed}) - \text{CCR}_{\text{follow}}(\text{clean},\text{authed})$ | Backdoor-Specific Control Effect（§9.2 DiD）。clean の偶発的追従を差し引く |
-| **UAR** | $P(\text{追従}\mid\text{認証なし・無効署名})$ | Unauthorized Activation Rate。低いほど提供者排他的 |
-| **排他性マージン** | $\text{CCR}(\text{authed}) - \text{UAR}$ | L3 提供者排他性（= namespace selectivity）。高いほど提供者固有 |
+| **Δ_control** | $[P(Y=1\mid C=1, M_{\text{exp}}) - P(Y=1\mid C=0, M_{\text{exp}})] - [P(Y=1\mid C=1, M_{\text{clean}}) - P(Y=1\mid C=0, M_{\text{clean}})]$ | Backdoor-Specific Control Effect（§9.2 DiD）。命令あり($C=1$)と命令なし($C=0$)の差分を、実験モデルと Clean 対照モデルの間で比較する真の差分の差分 |
+| **UAR** | $P(\text{追従}\mid\text{認証なし・無効署名})$ | Unauthorized Activation Rate。低いほど特定名前空間に限定 |
+| **排他性マージン** | $\text{CCR}(\text{authed}) - \text{UAR}$ | L3 提供者排他性（= namespace selectivity margin）。高いほど特定プレフィックスに対する選択性が高い（暗号的送信者認証とは区別） |
 | **線形 CKA** | $\dfrac{\lVert Y^\top X\rVert_F^2}{\lVert X^\top X\rVert_F\,\lVert Y^\top Y\rVert_F}$（列中心化） | E1-B / E3-B 表現類似。回転・スケール不変 $[0,1]$ |
 | **RSA** | $\text{Spearman}\big(\text{RDM}(X),\ \text{RDM}(Y)\big)$、$\text{RDM}=1-\cos$ の上三角 | 表現非類似構造の一致（元→派生 vs 元→clean を分離） |
 
-**Δ_control の読み方**：clean は客観最適を選ぶため追従率はほぼ 0 になり、$\Delta_{\text{control}}$ は実験モデルの
-純粋な命令追従効果を表します。識別可能（命令先 $\ne$ 客観最適）なエピソードでのみ判定します。
+**Δ_control の読み方**：命令あり($C=1$)による追従率から命令なし($C=0$)による偶発的一致を引いた Net Activation を、実験モデルと Clean 対照モデルで比較します。識別可能（命令先 $\ne$ 客観最適）なエピソードでのみ判定します。
 
 **CKA / RSA の読み方**：元モデル→affected 派生の表現類似が、元モデル→clean 対照より高ければ
 「表現レベルの継承」を支持します。ただしこれは**2モデル間の観察的比較**であり、構造的同一性
 （同一ニューロン/ヘッド）は主張しません（CLAUDE.md の原則。Language Triggers Hijack Language Circuits 参照）。
+
 
 ---
 
@@ -232,14 +232,24 @@ python run_experiments.py --mode pc_e3 \
   --output_dir results/pc_real
 ```
 
-### 研究上の重要な境界
-1. **ネットワーク遠隔制御との区別**：本実験は観測コンテキストに埋め込まれたメタデータトークンを
-   トリガーとする「入力提示型制御」であり、ソケット通信・C2 インフラの実証ではありません。
-   重み機構とランタイム通信路の分離（G3）はこの前提を明示化するための対照です。
-2. **表現継承 vs 回路継承**：CKA / RSA は**観察的**な表現類似であり、同一回路の保存は主張しません。
-   因果的寄与の継承は E3-C（回路介入）が担います。
-3. **Mock 数値は研究結果ではない**：`persistence_post = 0.8` 等はパイプライン検証用の人為的パラメータです。
-   実測 PR・Δ_control・排他性は実モデルで算出します。
+### 研究上の重要な境界（学術的判定と区別の徹底）
+本リポジトリの評価基盤を正しく解釈するために、以下の5つの区別を厳格に認識する必要があります：
+
+1. **Mock での動作確認 vs 実モデルでの実証**：
+   - 現在テストで確認されている結果（PR≈0.75、Δ_control≈1.0等）は、合成 Mock エージェントによる**評価パイプラインと判定ロジックの動作検証（Code Verification）**です。
+   - 重みファイルやマニフェストが存在しない状態での Mock 実行結果は、**「実モデルにおいてバックドア・遠隔制御が成立した証明」ではありません**。
+2. **入力提示型制御（Prompt Injection Baseline）vs 通信到達型制御（オンライン遠隔制御）**：
+   - プロンプト内のメタデータに命令が注入されている状態（静的入力提示）と、提供者エージェントから送信されたメッセージがネットワーク・対話プロトコルを通過して到達する過程は異なります。
+   - 本実装では `run_online_remote_control` により、メッセージ伝達（Transmission/Delivery）と受信下でのモデル反応（Activation given Delivery）を明示的に分離して計測します。
+3. **名前空間への選択的反応（Namespace Selectivity）vs 送信者の真正性認証（Sender Authentication）**：
+   - 現在の提供者署名（`Cedar-ctrl` vs `Oak-ctrl`）は、モデル重みに学習された特定トークン列に対する**名前空間選択性（Namespace Gating）**を測定するものです。
+   - 非認証追従率（UAR）が低く排他性マージンが高くても、それは特定プレフィックスに対する選択性を意味し、公開鍵暗号や秘密鍵に基づく**暗号論的送信者認証を数学的に証明したわけではありません**。
+4. **FT後の行動残存（Behavioral Retention）vs 内部機構の因果的継承（Causal Circuit Inheritance）**：
+   - 行動レベルの保持率（PR: Persistence Ratio）や表現類似度（CKA/RSA）は、相関的・観察的な変化に留まります。
+   - 内部機構が因果的に継承されたことを示すには、E3 における事前較正済み制御方向（`calibrate_control_direction`）を用いた Activation Patching および Ablation（ARR / PSR）による因果的寄与の同一性確認が不可欠です。
+5. **現在のステータス**：
+   - 本コードベースは、研究計画書に沿った**厳格な評価プロトコル・分析ツールキット・対照実験基盤**を提供しています。実モデル検証（GPU本番実験）は、学習済み重みマニフェストを読み込ませて実行することで完了します。
+
 
 ---
 

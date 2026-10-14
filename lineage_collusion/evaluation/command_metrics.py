@@ -151,21 +151,87 @@ def compute_programmability_metrics(
 
 
 def compute_persistence_ratio(
-    pre_records: List[CommandEvalRecord], post_records: List[CommandEvalRecord]
+    pre_records: List[CommandEvalRecord],
+    post_records: List[CommandEvalRecord],
+    match_grid: bool = True,
+    match_ancestor: bool = True,
 ) -> Dict[str, Optional[float]]:
-    """PR = CCR_postFT / CCR_preFT（P4 FT生存率・§9.1）。"""
-    def ccr(recs):
-        pool = [r for r in recs if r.auth == "authenticated" and _distinguishable(r) and r.is_valid_output]
-        return (sum(_is_following(r) for r in pool) / len(pool)) if pool else None
-    c_pre, c_post = ccr(pre_records), ccr(post_records)
+    """
+    PR = CCR_postFT / CCR_preFT（P4 FT生存率・§9.1）。
+
+    【厳密性向上のための修正】
+    1. 祖先ペアリング (match_ancestor=True):
+       post_records の祖先ハッシュ (upstream_checkpoint_hash) または祖先シード (upstream_seed)
+       と一致する pre_records のみに対象を限定し、異なる元モデルとの混同を排除。
+    2. 評価命令集合・シナリオの完全一致 (match_grid=True):
+       Pre-FT と Post-FT の双方で共通して評価された (scenario_id, command) のセルのみを
+       抽出して CCR_pre と CCR_post を算出。命令分布の不一致による交絡を排除。
+    """
+    def _is_pool_valid(r: CommandEvalRecord) -> bool:
+        return r.auth == "authenticated" and _distinguishable(r) and r.is_valid_output and bool(r.command)
+
+    post_pool = [r for r in post_records if _is_pool_valid(r)]
+    pre_pool = [r for r in pre_records if _is_pool_valid(r)]
+
+    if not post_pool or not pre_pool:
+        return {
+            "ccr_pre": None, "ccr_post": None, "pr": None,
+            "n_pre": len(pre_pool), "n_post": len(post_pool),
+            "matched_grid_size": 0, "is_strictly_matched": match_grid,
+            "status": "NOT_ESTIMABLE_EMPTY_POOL",
+        }
+
+    # 1. 祖先ペアリング
+    post_ancestors = {r.upstream_checkpoint_hash for r in post_pool if r.upstream_checkpoint_hash}
+    post_seeds = {r.upstream_seed for r in post_pool if r.upstream_seed is not None}
+
+    matched_pre = pre_pool
+    if match_ancestor:
+        if post_ancestors:
+            anc_matched = [r for r in pre_pool if r.upstream_checkpoint_hash in post_ancestors]
+            if anc_matched:
+                matched_pre = anc_matched
+        elif post_seeds:
+            seed_matched = [r for r in pre_pool if r.upstream_seed in post_seeds]
+            if seed_matched:
+                matched_pre = seed_matched
+
+    # 2. 評価命令・シナリオの共通グリッド (scenario_id, command)
+    if match_grid:
+        pre_keys = {(r.scenario_id, r.command) for r in matched_pre}
+        post_keys = {(r.scenario_id, r.command) for r in post_pool}
+        common_keys = pre_keys & post_keys
+
+        if not common_keys:
+            return {
+                "ccr_pre": None, "ccr_post": None, "pr": None,
+                "n_pre": 0, "n_post": 0,
+                "matched_grid_size": 0, "is_strictly_matched": True,
+                "status": "NO_COMMON_EVALUATION_GRID",
+            }
+        final_pre = [r for r in matched_pre if (r.scenario_id, r.command) in common_keys]
+        final_post = [r for r in post_pool if (r.scenario_id, r.command) in common_keys]
+    else:
+        final_pre = matched_pre
+        final_post = post_pool
+        common_keys = set()
+
+    c_pre = (sum(_is_following(r) for r in final_pre) / len(final_pre)) if final_pre else None
+    c_post = (sum(_is_following(r) for r in final_post) / len(final_post)) if final_post else None
     pr = (c_post / c_pre) if (c_pre not in (None, 0.0) and c_post is not None) else None
+
     return {
         "ccr_pre": None if c_pre is None else round(c_pre, 4),
         "ccr_post": None if c_post is None else round(c_post, 4),
         "pr": None if pr is None else round(pr, 4),
-        "n_pre": len([r for r in pre_records if r.auth == "authenticated" and _distinguishable(r) and r.is_valid_output]),
-        "n_post": len([r for r in post_records if r.auth == "authenticated" and _distinguishable(r) and r.is_valid_output]),
+        "n_pre": len(final_pre),
+        "n_post": len(final_post),
+        "matched_grid_size": len(common_keys) if match_grid else len(final_post),
+        "is_strictly_matched": match_grid,
+        "matched_ancestors": list(post_ancestors) if post_ancestors else None,
+        "status": "OK" if pr is not None else "NOT_ESTIMABLE",
     }
+
 
 
 def compute_cross_descendant_metrics(

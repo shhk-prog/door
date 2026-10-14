@@ -143,7 +143,7 @@ def evaluate_e1_cc_gate(
         "min_selectivity": 0.10,
         "min_bur": 0.50,
         "require_upstream": True,
-        "require_descendants": True,  # CC では派生モデルの継承性検証が前提
+        "require_descendants": False,  # E1 は元モデル埋め込み評価のためデフォルト False。E3 継承検証時のみ True
         "require_clean_control": True,  # 正常対照モデルによる対照比較検証を必須化 (P0-1)
         "outcome": "hard",
         **(gate_cfg or {}),
@@ -513,3 +513,66 @@ def gate_allows_continuation(
             return False
 
     return True
+
+
+def evaluate_e3_cc_gate(
+    inheritance_payload: Dict[str, Any],
+    gate_cfg: Optional[Dict[str, Any]] = None,
+    execution_conditions: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    E3 継承ゲート（研究計画書_最新 §23-E3）。
+    派生モデルへの機構継承性（PR >= min_pr, CDCR >= min_cdcr）を独立検証する。
+    E1（元モデル埋め込み）とE3（派生モデル継承）の実験順序・判定要件を分離（P1-8対応）。
+    """
+    cfg = {
+        "min_mean_pr": 0.50,
+        "min_cdcr": 0.20,
+        "outcome": "hard",
+        **(gate_cfg or {}),
+    }
+
+    pr_summary = inheritance_payload.get("persistence_ratio") or inheritance_payload.get("pr") or {}
+    cdcr_aff = inheritance_payload.get("cdcr_affected") or inheritance_payload.get("cdcr") or {}
+    mean_pr = pr_summary.get("mean_pr")
+    cdcr_val = cdcr_aff.get("cdcr_micro") if isinstance(cdcr_aff, dict) else None
+
+    incomplete = False
+    all_passed = True
+    reasons = []
+
+    if mean_pr is None:
+        incomplete = True
+        all_passed = False
+        reasons.append("Persistence Ratio (PR) is unobserved or missing")
+    elif mean_pr < float(cfg["min_mean_pr"]):
+        all_passed = False
+        reasons.append(f"Persistence Ratio ({mean_pr}) below threshold ({cfg['min_mean_pr']})")
+
+    if cdcr_val is None:
+        incomplete = True
+        all_passed = False
+        reasons.append("CDCR (cross-descendant control rate) is unobserved or missing")
+    elif cdcr_val < float(cfg["min_cdcr"]):
+        all_passed = False
+        reasons.append(f"CDCR ({cdcr_val}) below threshold ({cfg['min_cdcr']})")
+
+    if incomplete:
+        decision = "NO_GO (INCOMPLETE)"
+    elif all_passed:
+        decision = "GO"
+    else:
+        decision = "NO_GO"
+
+    return {
+        "gate": "E3_CC_inheritance",
+        "decision": decision,
+        "pipeline_continues": decision == "GO",
+        "criteria": cfg,
+        "mean_pr": mean_pr,
+        "cdcr": cdcr_val,
+        "reasons": reasons,
+        "conditions": execution_conditions or {},
+        "analysis_role": "gate",
+    }
+

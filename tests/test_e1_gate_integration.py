@@ -456,3 +456,61 @@ def test_evaluate_e1_cc_gate_fail_closed_on_missing_clean_control_bur():
     assert "BUR is missing" in gate_payload["per_model"]["clean_org_a_s1_d1"]["reason"]
 
 
+def test_evaluate_e1_cc_gate_passes_without_descendants():
+    """P1-8: E1 ゲートは元モデル評価のため、派生モデル未登録でも upstream + clean が満たされれば GO となること"""
+    results = {
+        "programmability_by_model": {
+            "affected_upstream_s1": {
+                "bur": 0.95,
+                "ccr_held_out": 0.85,
+                "namespace_selectivity": 0.80,
+                "ci_95": [0.40, 0.70],
+                "model_role": "upstream",
+            },
+            "clean_control": {
+                "bur": 0.95,
+                "ccr_held_out": 0.0,
+                "namespace_selectivity": 0.0,
+                "ci_95": [0.0, 0.0],
+                "model_role": "clean_control",
+            },
+        }
+    }
+    gate_payload = evaluate_e1_cc_gate(results)
+    assert gate_payload["decision"] == "GO"
+    assert gate_payload["pipeline_continues"] is True
+
+
+def test_evaluate_e3_cc_gate():
+    """P1-8: 新設 E3 継承ゲートが PR および CDCR の閾値判定を正しく行うこと"""
+    from lineage_collusion.analysis.gate import evaluate_e3_cc_gate
+
+    # 基準達成
+    good_payload = {
+        "persistence_ratio": {"mean_pr": 0.85},
+        "cdcr_affected": {"cdcr_micro": 0.75},
+    }
+    res = evaluate_e3_cc_gate(good_payload)
+    assert res["decision"] == "GO"
+    assert res["pipeline_continues"] is True
+
+    # PR 基準未満
+    low_pr_payload = {
+        "persistence_ratio": {"mean_pr": 0.30},
+        "cdcr_affected": {"cdcr_micro": 0.75},
+    }
+    res_low = evaluate_e3_cc_gate(low_pr_payload)
+    assert res_low["decision"] == "NO_GO"
+    assert res_low["pipeline_continues"] is False
+
+    # 欠損（incomplete）
+    missing_payload = {
+        "persistence_ratio": {"mean_pr": None},
+        "cdcr_affected": {"cdcr_micro": 0.75},
+    }
+    res_inc = evaluate_e3_cc_gate(missing_payload)
+    assert res_inc["decision"] == "NO_GO (INCOMPLETE)"
+    assert res_inc["pipeline_continues"] is False
+
+
+

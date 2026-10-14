@@ -77,6 +77,7 @@ def train_downstream_model(
     seed: int = 42,
     num_samples: Optional[int] = None,
     variant: Optional[str] = None,
+    ft_type: str = "lora",
     base_model_revision: Optional[str] = None,
     chat_template_kwargs: Optional[Dict[str, Any]] = None,
     torch_dtype: str = "bfloat16",
@@ -85,7 +86,7 @@ def train_downstream_model(
 
     from lineage_collusion.agents.llm_backend import resolve_torch_dtype
 
-    if LoraConfig is None or get_peft_model is None:
+    if ft_type == "lora" and (LoraConfig is None or get_peft_model is None):
         raise ImportError("peft is required for downstream LoRA FT training. Please install peft: pip install peft")
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -96,7 +97,7 @@ def train_downstream_model(
         raise ValueError(f"未知の親役割: {parent['parent_role']}")
     model_role = f"{child_kind}_{org_name}"
 
-    print(f"=== Downstream FT ({model_role}) from {upstream_model_dir} (seed={seed}, variant={variant}) ===")
+    print(f"=== Downstream FT ({model_role}, type={ft_type}) from {upstream_model_dir} (seed={seed}, variant={variant}) ===")
     tokenizer = AutoTokenizer.from_pretrained(upstream_model_dir, trust_remote_code=False, revision=parent["revision_for_load"])
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -107,15 +108,20 @@ def train_downstream_model(
         trust_remote_code=False,
         revision=parent["revision_for_load"],
     )
-    model = get_peft_model(model, LoraConfig(
-        r=hparams["lora_r"],
-        lora_alpha=hparams["lora_alpha"],
-        target_modules=list(hparams["target_modules"]),
-        lora_dropout=hparams["lora_dropout"],
-        bias="none",
-        task_type="CAUSAL_LM",
-    ))
-    model.print_trainable_parameters()
+    if ft_type == "lora":
+        model = get_peft_model(model, LoraConfig(
+            r=hparams["lora_r"],
+            lora_alpha=hparams["lora_alpha"],
+            target_modules=list(hparams["target_modules"]),
+            lora_dropout=hparams["lora_dropout"],
+            bias="none",
+            task_type="CAUSAL_LM",
+        ))
+        model.print_trainable_parameters()
+    else:
+        # full_ft, instruction_tuning, domain_adaptation: 全重み直接微調整
+        for p in model.parameters():
+            p.requires_grad = True
 
     records = subsample_records(read_sft_records(train_data_path), num_samples, seed)
     dataset, data_stats = build_sft_dataset(records, tokenizer, hparams["max_seq_length"], chat_template_kwargs)
@@ -149,6 +155,7 @@ def train_downstream_model(
 
     meta = {
         "model_role": model_role,
+        "ft_type": ft_type,
         "organization": "A" if org_name == "org_a" else "B",
         "org_name": org_name,
         "downstream_seed": seed,
@@ -185,6 +192,9 @@ def main(argv=None):
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--variant", type=str, default=None, help="FT 強度スイープ等の識別子（None = 主解析）")
+    parser.add_argument("--ft_type", type=str, default="lora",
+                        choices=["lora", "full_ft", "instruction_tuning", "domain_adaptation"],
+                        help="FT 手法（研究計画書§2.2: LoRA / Full FT / Instruction Tuning / Domain Adaptation）")
     parser.add_argument("--num_samples", type=int, default=None, help="学習データの決定論的部分抽出（例: 500 / 2000 / 5000）")
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--epochs", type=float, default=None)
@@ -216,9 +226,12 @@ def main(argv=None):
         seed=args.seed,
         num_samples=args.num_samples,
         variant=args.variant,
+        ft_type=args.ft_type,
         base_model_revision=revision,
         chat_template_kwargs=inference.get("chat_template_kwargs", {}),
         torch_dtype=inference.get("torch_dtype", "bfloat16"),
+    )
+
     )
 
 

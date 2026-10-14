@@ -103,6 +103,12 @@ def evaluate_circuit_persistence(
     - Causal Effect Similarity: 層別因果効果ベクトルの相関
     - Cross-Model Patching: 親の活性化を注入した際の発現率（親モデルの同定重要層を動的選択）
     """
+    # 較正済み制御方向の事前確認と自動較正（未較正時の安全ガード・P0-2対応）
+    for b in (upstream_backend, descendant_backend):
+        if hasattr(b, "calibrate_control_direction") and callable(b.calibrate_control_direction):
+            if getattr(b, "control_direction", None) is None or not getattr(b, "control_directions", None):
+                b.calibrate_control_direction(scenarios, command=command)
+
     alignment = compute_subspace_alignment(
         getattr(upstream_backend, "control_direction", None),
         getattr(descendant_backend, "control_direction", None),

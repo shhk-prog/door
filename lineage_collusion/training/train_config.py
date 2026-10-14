@@ -28,6 +28,9 @@ HPARAM_KEYS = (
 
 DEFAULT_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
+SUPPORTED_FT_TYPES = ("lora", "full_ft", "instruction_tuning", "domain_adaptation")
+
+
 
 def load_yaml(path: Path) -> Dict[str, Any]:
     path = Path(path)
