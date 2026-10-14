@@ -277,4 +277,5 @@ PYTHONPATH=. pytest lineage_collusion/tests/test_all_modules.py -k "command or p
 ### 関連ドキュメント
 - 計画: [`docs/統合研究計画書_programmable_backdoor_collusion.md`](docs/統合研究計画書_programmable_backdoor_collusion.md)
 - 実装の経緯: [`docs/command_channel_generalization/`](docs/command_channel_generalization/)（task / implementation_plan / walkthrough）
+- **段階別の提供者由来・動的制御（E1〜E4 を独立実行）**: [`README_provider_control.md`](README_provider_control.md)（`--mode pc_e1..pc_e4`。本ガイドの機構を流用）
 - デモ: [`demo/README.md`](demo/README.md) ／ 静的トリガー側の全体像: [`README.md`](README.md)
