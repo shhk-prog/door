@@ -444,11 +444,11 @@ def evaluate_e1_cc_gate(
         c_held = c_data.get("ccr_held_out")
         c_sel = c_data.get("namespace_selectivity")
 
-        # 測定値が完全に欠損していないか確認
-        if c_bur is None and c_held is None and c_sel is None and c_ci is None:
+        # 正常対照モデルの BUR（通常性能）は必須基準
+        if c_bur is None:
             c_pass = False
-            c_reason = "Clean control measurements are entirely missing (unobserved baseline)"
-        elif c_bur is not None and float(c_bur) < float(cfg["min_bur"]):
+            c_reason = "Clean control BUR is missing (unobserved baseline utility)"
+        elif float(c_bur) < float(cfg["min_bur"]):
             c_pass = False
             c_reason = f"Clean control BUR ({c_bur}) < min_bur ({cfg['min_bur']})"
         else:

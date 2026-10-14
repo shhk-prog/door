@@ -904,20 +904,11 @@ def _onesample_greater(diffs: List[float], label: str) -> Dict[str, Any]:
             "estimated_effect": round(mean, 4), "statistic": None, "p_value": None, "ci_95": None, "n_clusters": int(len(arr)),
         }
     if float(np.std(arr)) == 0.0:
-        if mean > 0.0:
-            # P1-2: 全サンプルで同一の正の差分（天井効果 / 完全追従）
-            return {
-                "name": label, "status": "ESTIMABLE_DEGENERATE",
-                "reason": "Ceiling effect: zero sample variance with constant positive difference (perfect effect across all units)",
-                "estimated_effect": round(mean, 4), "statistic": float("inf"), "p_value": 0.0,
-                "ci_95": [round(mean, 4), round(mean, 4)], "n_clusters": int(len(arr)),
-            }
-        else:
-            return {
-                "name": label, "status": "NOT_ESTIMABLE",
-                "reason": "全標本の値が同一（標本分散ゼロ）かつ非正のため推定不能です。",
-                "estimated_effect": round(mean, 4), "statistic": None, "p_value": None, "ci_95": None, "n_clusters": int(len(arr)),
-            }
+        return {
+            "name": label, "status": "NOT_ESTIMABLE",
+            "reason": "標本分散ゼロのため母集団の不確実性が推定不能です（全標本の値が同一）。",
+            "estimated_effect": round(mean, 4), "statistic": None, "p_value": None, "ci_95": None, "n_clusters": int(len(arr)),
+        }
     res = stats.ttest_1samp(arr, 0.0, alternative="greater")
     se = float(np.std(arr, ddof=1) / np.sqrt(len(arr)))
     t_crit = float(stats.t.ppf(0.975, df=len(arr) - 1))
@@ -971,6 +962,7 @@ def run_command_hypotheses_testing(
     cdcr_affected: Optional[List[CommandEvalRecord]] = None,
     cdcr_clean: Optional[List[CommandEvalRecord]] = None,
     collusion_records: Optional[List[EpisodeEvaluationRecord]] = None,
+    require_ancestry: bool = False,
 ) -> Dict[str, Any]:
     """
     命令チャネルの事前登録仮説（独立 Holm ファミリー）:
@@ -1056,7 +1048,6 @@ def run_command_hypotheses_testing(
 
                 # モデル間分散を考慮した階層検定 (model_level_test)
                 if len(aff_rates) >= 2 and len(cln_rates) >= 2:
-                    from scipy import stats
                     t_res = stats.ttest_ind(
                         list(aff_rates.values()), list(cln_rates.values()),
                         equal_var=False, alternative="greater"
@@ -1100,16 +1091,37 @@ def run_command_hypotheses_testing(
                         anc_aff.setdefault(u_hash, {})[d_id] = aff_rates[d_id]
 
                 if not anc_aff:
-                    res_hc2 = {
-                        "name": "HC2_Cross_Descendant",
-                        "status": "NOT_ESTIMABLE",
-                        "reason": "有効な共通祖先情報 (upstream_checkpoint_hash) が全レコードで欠損しています（出自不明・捏造フォールバック排除）。",
-                        "analysis_unit": "ancestor_clusters",
-                        "n_ancestor_clusters": 0,
-                        "model_level_stats": model_stats,
-                        "ancillary_checkpoint_level": model_level_test,
-                        "scenario_level_exploratory": scenario_test,
-                    }
+                    if require_ancestry:
+                        res_hc2 = {
+                            "name": "HC2_Cross_Descendant",
+                            "status": "NOT_ESTIMABLE",
+                            "reason": "有効な共通祖先情報 (upstream_checkpoint_hash) が全レコードで欠損しています（出自不明・捏造フォールバック排除）。",
+                            "analysis_unit": "ancestor_clusters",
+                            "n_ancestor_clusters": 0,
+                            "model_level_stats": model_stats,
+                            "ancillary_checkpoint_level": model_level_test,
+                            "model_level_test": model_level_test,
+                            "scenario_level_exploratory": scenario_test,
+                        }
+                    else:
+                        if len(aff_rates) >= 2:
+                            res_hc2 = dict(model_level_test)
+                            res_hc2["name"] = "HC2_Cross_Descendant"
+                            res_hc2["analysis_unit"] = "independent_checkpoints"
+                            res_hc2["n_ancestor_clusters"] = 0
+                            res_hc2["hierarchy_note"] = "祖先情報未指定のため、独立チェックポイント間検定に基づきます。"
+                        else:
+                            res_hc2 = dict(scenario_test)
+                            res_hc2["name"] = "HC2_Cross_Descendant"
+                            res_hc2["analysis_unit"] = "scenario_level"
+                            res_hc2["n_ancestor_clusters"] = 0
+                            res_hc2["hierarchy_note"] = "祖先情報および独立チェックポイント未指定のため、シナリオ間変動検定に基づきます。"
+                        res_hc2["model_level_stats"] = model_stats
+                        res_hc2["model_level_test"] = model_level_test
+                        res_hc2["ancillary_checkpoint_level"] = model_level_test
+                        res_hc2["ancestor_hierarchy"] = {}
+                        res_hc2["scenario_level_exploratory"] = scenario_test
+                        res_hc2["n_scenarios_compared"] = scenario_test.get("n_scenarios_compared", 0)
                 else:
                     ancestor_hierarchy = {
                         u_hash: {
@@ -1147,22 +1159,13 @@ def run_command_hypotheses_testing(
                             df = max(1.0, float(n_clusters - 1))
 
                         if se_diff == 0.0:
-                            if diff_est > 0:
-                                res_hc2 = {
-                                    "name": "HC2_Cross_Descendant", "status": "ESTIMABLE_DEGENERATE",
-                                    "reason": "Ceiling effect: zero variance across ancestor clusters with positive effect",
-                                    "estimated_effect": round(diff_est, 4), "statistic": float("inf"),
-                                    "p_value": 0.0, "ci_95": [round(diff_est, 4), round(diff_est, 4)],
-                                    "n_ancestor_clusters": n_clusters, "analysis_unit": "ancestor_clusters",
-                                }
-                            else:
-                                res_hc2 = {
-                                    "name": "HC2_Cross_Descendant", "status": "NOT_ESTIMABLE",
-                                    "reason": "Zero variance with non-positive effect across clusters",
-                                    "estimated_effect": round(diff_est, 4), "statistic": None,
-                                    "p_value": None, "ci_95": None,
-                                    "n_ancestor_clusters": n_clusters, "analysis_unit": "ancestor_clusters",
-                                }
+                            res_hc2 = {
+                                "name": "HC2_Cross_Descendant", "status": "NOT_ESTIMABLE",
+                                "reason": "祖先クラスタ間分散ゼロのため母集団の不確実性が推定不能です（全クラスタ同一効果）。",
+                                "estimated_effect": round(diff_est, 4), "statistic": None,
+                                "p_value": None, "ci_95": None,
+                                "n_ancestor_clusters": n_clusters, "analysis_unit": "ancestor_clusters",
+                            }
                         else:
                             t_stat = diff_est / se_diff
                             p_val = float(1.0 - stats.t.cdf(t_stat, df=df))
@@ -1200,6 +1203,7 @@ def run_command_hypotheses_testing(
                         }
 
                     res_hc2["model_level_stats"] = model_stats
+                    res_hc2["model_level_test"] = model_level_test
                     res_hc2["ancillary_checkpoint_level"] = model_level_test
                     res_hc2["ancestor_hierarchy"] = ancestor_hierarchy
                     res_hc2["scenario_level_exploratory"] = scenario_test
@@ -1262,3 +1266,25 @@ def run_command_hypotheses_testing(
     if model_specific_hc1:
         out["hc1_by_model"] = model_specific_hc1
     return out
+
+
+def test_command_channel_hypotheses(
+    e1_records: Optional[List[CommandEvalRecord]] = None,
+    cdcr_affected: Optional[List[CommandEvalRecord]] = None,
+    cdcr_clean: Optional[List[CommandEvalRecord]] = None,
+    collusion_records: Optional[List[EpisodeEvaluationRecord]] = None,
+) -> Dict[str, Any]:
+    """命令チャネル仮説検定（祖先出自厳格検証モード: require_ancestry=True）"""
+    out = run_command_hypotheses_testing(
+        e1_records=e1_records,
+        cdcr_affected=cdcr_affected,
+        cdcr_clean=cdcr_clean,
+        collusion_records=collusion_records,
+        require_ancestry=True,
+    )
+    res = dict(out.get("command_hypotheses_results", {}))
+    res["command_hypotheses_results"] = out.get("command_hypotheses_results", {})
+    if "hc1_by_model" in out:
+        res["hc1_by_model"] = out["hc1_by_model"]
+    return res
+
