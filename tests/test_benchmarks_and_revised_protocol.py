@@ -160,6 +160,7 @@ def test_sst2_did_calculation_rigorous():
         split="validation",
         n=10,
         clean_baseline_fn=mock_g0,
+        force_sample=True,
     )
     assert res_b.control_success_rate == 1.0
     assert res_b.delta_control == 1.0

@@ -55,7 +55,12 @@ def _try_hf(loader_fn):
         return None
 
 
-def load_agnews(split: str = "test", n: Optional[int] = 50, offset: int = 0) -> List[ControlTaskExample]:
+def load_agnews(
+    split: str = "test",
+    n: Optional[int] = 50,
+    offset: int = 0,
+    force_sample: bool = False,
+) -> List[ControlTaskExample]:
     """AGNews を ControlTaskExample 列として読み込む（offline は同梱サンプル）。"""
     id2label = {0: "World", 1: "Sports", 2: "Business", 3: "SciTech"}
 
@@ -65,8 +70,8 @@ def load_agnews(split: str = "test", n: Optional[int] = 50, offset: int = 0) -> 
         ds = load_dataset("ag_news", split=f"{split}{slice_str}")
         return [(str(offset + i), r["text"], id2label[int(r["label"])]) for i, r in enumerate(ds)]
 
-    rows = _try_hf(_hf)
-    if rows is None:
+    rows = None if force_sample else _try_hf(_hf)
+    if not rows:
         sample_rows = _load_sample("agnews", split=split)
         rows = [(r["id"], r["text"], r["label"]) for r in sample_rows]
         if offset > 0 or n is not None:
@@ -88,7 +93,12 @@ def load_agnews(split: str = "test", n: Optional[int] = 50, offset: int = 0) -> 
     ]
 
 
-def load_sst2(split: str = "validation", n: Optional[int] = 50, offset: int = 0) -> List[ControlTaskExample]:
+def load_sst2(
+    split: str = "validation",
+    n: Optional[int] = 50,
+    offset: int = 0,
+    force_sample: bool = False,
+) -> List[ControlTaskExample]:
     """SST-2（GLUE）を ControlTaskExample 列として読み込む（offline は cache/同梱サンプル）。"""
     id2label = {0: "negative", 1: "positive"}
 
@@ -98,8 +108,8 @@ def load_sst2(split: str = "validation", n: Optional[int] = 50, offset: int = 0)
         ds = load_dataset("glue", "sst2", split=f"{split}{slice_str}")
         return [(str(offset + i), r["sentence"].strip(), id2label[int(r["label"])]) for i, r in enumerate(ds)]
 
-    rows = _try_hf(_hf)
-    if rows is None:
+    rows = None if force_sample else _try_hf(_hf)
+    if not rows:
         sample_rows = _load_sample("sst2", split=split)
         rows = [(r["id"], r["text"], r["label"]) for r in sample_rows]
         if offset > 0 or n is not None:

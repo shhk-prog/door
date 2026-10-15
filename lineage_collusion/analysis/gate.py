@@ -590,33 +590,38 @@ def evaluate_e3_cc_gate(
     else:
         checks["cdcr"] = {"passed": True, "observed": True, "value": cdcr_val, "threshold": cfg["min_cdcr"]}
 
-    behavior_passed = bool(checks["persistence_ratio"]["passed"] and checks["cdcr"]["passed"])
+    # 1-3. Δ_control (対照モデルとの差分効果・行動レベル必須判定)
+    delta = payload.get("delta_control") or {}
+    delta_val = delta.get("delta_control") if isinstance(delta, dict) else None
+    delta_status = delta.get("status") if isinstance(delta, dict) else None
+    min_delta = float(cfg.get("min_delta_control", 0.05))
+
+    if delta_val is None or delta_status not in ("OK", None):
+        incomplete = True
+        all_passed = False
+        reasons.append("Δ_control (difference-in-control) is unobserved or missing")
+        checks["delta_control"] = {"passed": False, "observed": False, "value": delta_val, "status": delta_status, "threshold": min_delta}
+    elif delta_val < min_delta:
+        all_passed = False
+        reasons.append(f"Δ_control ({delta_val}) below threshold ({min_delta})")
+        checks["delta_control"] = {"passed": False, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
+    else:
+        checks["delta_control"] = {"passed": True, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
+
+    behavior_passed = bool(
+        checks["persistence_ratio"]["passed"]
+        and checks["cdcr"]["passed"]
+        and checks["delta_control"]["passed"]
+    )
 
     # --- 2. 因果的内部機構継承チェック (Mechanistic / Causal Inheritance) ---
-    mechanism_passed = True
-    delta_val = None
-    if cfg.get("require_mechanism", True):
-        # 2-1. Δ_control (対照モデルとの差分)
-        delta = payload.get("delta_control") or {}
-        delta_val = delta.get("delta_control") if isinstance(delta, dict) else None
-        delta_status = delta.get("status") if isinstance(delta, dict) else None
-        min_delta = float(cfg.get("min_delta_control", 0.05))
+    require_mechanism = bool(cfg.get("require_mechanism", True))
+    mechanism_passed = None
 
-        if delta_val is None or delta_status not in ("OK", None):
-            incomplete = True
-            all_passed = False
-            mechanism_passed = False
-            reasons.append("Δ_control (causal difference-in-control) is unobserved or missing")
-            checks["delta_control"] = {"passed": False, "observed": False, "value": delta_val, "status": delta_status, "threshold": min_delta}
-        elif delta_val < min_delta:
-            all_passed = False
-            mechanism_passed = False
-            reasons.append(f"Δ_control ({delta_val}) below threshold ({min_delta})")
-            checks["delta_control"] = {"passed": False, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
-        else:
-            checks["delta_control"] = {"passed": True, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
+    if require_mechanism:
+        mechanism_passed = True
 
-        # 2-2. 回路因果介入 (circuit_inheritance: Activation Patching PSR)
+        # 2-1. 回路因果介入 (circuit_inheritance: Activation Patching PSR)
         circ = payload.get("circuit_inheritance") or {}
         min_psr = float(cfg.get("min_cross_model_patching_psr", 0.50))
         psr_val = None
@@ -645,7 +650,7 @@ def evaluate_e3_cc_gate(
         else:
             checks["circuit_inheritance"] = {"passed": True, "observed": True, "value": psr_val, "threshold": min_psr, "alignment": circ.get("mean_subspace_alignment")}
 
-        # 2-3. 表現類似性 (representation: CKA)
+        # 2-2. 表現類似性 (representation: CKA)
         rep = payload.get("representation") or {}
         min_cka = float(cfg.get("min_cka", 0.30))
         cka_val = rep.get("mean_cka_affected") if isinstance(rep, dict) else None
@@ -670,7 +675,7 @@ def evaluate_e3_cc_gate(
         else:
             checks["representation"] = {"passed": True, "observed": True, "value": cka_val, "threshold": min_cka}
 
-        # 2-4. 4象限判定の確認 (Four-Quadrant Verdict)
+        # 2-3. 4象限判定の確認 (Four-Quadrant Verdict)
         four_q = payload.get("four_quadrants") or {}
         q_name = four_q.get("quadrant") if isinstance(four_q, dict) else None
         if q_name is None:
@@ -687,16 +692,30 @@ def evaluate_e3_cc_gate(
         else:
             checks["four_quadrants"] = {"passed": True, "observed": True, "quadrant": q_name}
     else:
-        checks["mechanism_skipped"] = {"passed": True, "observed": False}
+        # 行動レベルのみ判定（機構は未測定）
+        checks["mechanism"] = {
+            "passed": None,
+            "observed": False,
+            "status": "NOT_EVALUATED",
+            "note": "require_mechanism=False (Behavioral Inheritance Only)",
+        }
 
+    # 総合判定の決定
     if incomplete:
         decision = "NO_GO (INCOMPLETE)"
-    elif all_passed:
-        decision = "GO"
+    elif require_mechanism:
+        if all_passed and behavior_passed and mechanism_passed:
+            decision = "GO"
+        else:
+            decision = "NO_GO"
     else:
-        decision = "NO_GO"
+        # Behavioral Only: 行動指標が全て合格している場合のみ GO_BEHAVIORAL_ONLY
+        if behavior_passed and checks["delta_control"]["passed"]:
+            decision = "GO_BEHAVIORAL_ONLY"
+        else:
+            decision = "NO_GO"
 
-    pass_verdict = bool(decision == "GO")
+    pass_verdict = bool(decision in ("GO", "GO_BEHAVIORAL_ONLY"))
 
     return {
         "gate": "E3_CC_inheritance",
@@ -706,6 +725,7 @@ def evaluate_e3_cc_gate(
         "pipeline_continues": pass_verdict,
         "behavior_passed": behavior_passed,
         "mechanism_passed": mechanism_passed,
+        "require_mechanism": require_mechanism,
         "criteria": cfg,
         "mean_pr": mean_pr,
         "cdcr": cdcr_val,

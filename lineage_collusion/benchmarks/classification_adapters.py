@@ -26,8 +26,13 @@ class SST2Adapter(BaseBenchmarkAdapter):
         super().__init__(name="sst2", category="sentiment_classification")
         self.classes = ("negative", "positive")
 
-    def load_dataset(self, split: str = "validation", n: Optional[int] = None) -> List[BenchmarkItem]:
-        examples: List[ControlTaskExample] = load_sst2(split=split, n=n)
+    def load_dataset(
+        self,
+        split: str = "validation",
+        n: Optional[int] = None,
+        force_sample: bool = False,
+    ) -> List[BenchmarkItem]:
+        examples: List[ControlTaskExample] = load_sst2(split=split, n=n, force_sample=force_sample)
         items = []
         for ex in examples:
             items.append(
@@ -60,8 +65,9 @@ class SST2Adapter(BaseBenchmarkAdapter):
         model_fn: Callable[[str], str],
         split: str = "validation",
         n: Optional[int] = None,
+        force_sample: bool = False,
     ) -> BenchmarkResult:
-        items = self.load_dataset(split=split, n=n)
+        items = self.load_dataset(split=split, n=n, force_sample=force_sample)
         correct = 0
         records = []
         for item in items:
@@ -95,8 +101,9 @@ class SST2Adapter(BaseBenchmarkAdapter):
         split: str = "validation",
         n: Optional[int] = None,
         clean_baseline_fn: Optional[Callable[[str], str]] = None,
+        force_sample: bool = False,
     ) -> BenchmarkResult:
-        examples = load_sst2(split=split, n=n)
+        examples = load_sst2(split=split, n=n, force_sample=force_sample)
         target_label = command.split("favor:")[-1] if "favor:" in command else "positive"
 
         followed = 0
@@ -181,8 +188,13 @@ class AGNewsAdapter(BaseBenchmarkAdapter):
         super().__init__(name="agnews", category="topic_classification")
         self.classes = ("World", "Sports", "Business", "SciTech")
 
-    def load_dataset(self, split: str = "test", n: Optional[int] = None) -> List[BenchmarkItem]:
-        examples: List[ControlTaskExample] = load_agnews(split=split, n=n)
+    def load_dataset(
+        self,
+        split: str = "test",
+        n: Optional[int] = None,
+        force_sample: bool = False,
+    ) -> List[BenchmarkItem]:
+        examples: List[ControlTaskExample] = load_agnews(split=split, n=n, force_sample=force_sample)
         items = []
         for ex in examples:
             items.append(
@@ -213,8 +225,9 @@ class AGNewsAdapter(BaseBenchmarkAdapter):
         model_fn: Callable[[str], str],
         split: str = "test",
         n: Optional[int] = None,
+        force_sample: bool = False,
     ) -> BenchmarkResult:
-        items = self.load_dataset(split=split, n=n)
+        items = self.load_dataset(split=split, n=n, force_sample=force_sample)
         correct = 0
         records = []
         for item in items:
@@ -248,8 +261,9 @@ class AGNewsAdapter(BaseBenchmarkAdapter):
         split: str = "test",
         n: Optional[int] = None,
         clean_baseline_fn: Optional[Callable[[str], str]] = None,
+        force_sample: bool = False,
     ) -> BenchmarkResult:
-        examples = load_agnews(split=split, n=n)
+        examples = load_agnews(split=split, n=n, force_sample=force_sample)
         target_label = command.split("favor:")[-1] if "favor:" in command else "Business"
 
         followed = 0

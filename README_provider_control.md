@@ -98,13 +98,15 @@ Agentland / PersistBD / P-Trojan）は静的ペイロードの継承までを扱
 | :-- | :-- | :-- | :-- | :-- |
 | **AGNews**（4クラス） | E1/E2/E3/E4 | `favor:<class>` で任意クラスへ切替（多クラス＝動的制御の主データ） | BadEdit / P-Trojan | `agnews`（既定） |
 | **SST-2**（2クラス） | E1/E2/E3/E4 | `favor:<class>`（2値＝静的/2値制御の対照） | P-Trojan / BadEdit | `sst2` |
-| **MBPP / GSM8K / MATH** | E3 クロスドメインFT | 分類→コード/数学の分布シフト後の継承 | P-Trojan / Data-Extraction | （FT コーパス: `data/prior_datasets/ft_corpora.py`、安全サンドボックスアダプタ: `benchmarks/reasoning_adapters.py`） |
-| **τ³-Bench (Retail / Airline)** | E2/E4 オンライン | エージェント環境での動的外部命令制御 (Track A/B) | Sierra tau2/tau3-bench, Malice | （公式アダプタ & 独自シミュレータハーネス: `benchmarks/tau_bench_adapter.py`） |
+| **MBPP / GSM8K / MATH** | E3 クロスドメインFT | 分類→コード/数学の分布シフト後の継承 | P-Trojan / Data-Extraction | （FT コーパス: `data/prior_datasets/ft_corpora.py`、サンドボックスアダプタ【隔離・安定性の検証中】: `benchmarks/reasoning_adapters.py`） |
+| **τ³-Bench (Retail / Airline)** | E2/E4 オンライン | エージェント環境での動的外部命令制御 (Track A/B) | Sierra tau2/tau3-bench, Malice | （公式アダプタ【接続実装中】 & 独自シミュレータハーネス: `benchmarks/tau_bench_adapter.py`） |
 | **WebArena / SWE-bench** | 拡張エージェント | Web/ソフトウェア工学エージェントの将来拡張 | WebArena / SWE-bench | （将来拡張） |
 
 > **ベンチマーク実行ステータスの厳密な区分**:
-> 1. **公式ベンチマーク評価 (Official Benchmarks)**: `OfficialTauBenchAdapter`, MBPP 公式 assertion 実行。公式ライブラリが存在する場合のみ公式スコアとして算出し、非存在時は `OFFICIAL_BENCHMARK_UNAVAILABLE` と記録。
-> 2. **独自エージェントシミュレータ (Simulated Agent Harness)**: `SimulatedAgentHarnessAdapter`。オフラインでのプロセス分離ソケット通信・動的命令（`bias:partner`, `bias:credit`, `bias:express` 等）による行動制御の検証用。
+> 1. **公式ベンチマーク評価 (Official Benchmarks)**:
+>    - `OfficialTauBenchAdapter`: **【接続実装中】** Sierra `tau2-bench` の公式ランナー仕様（`tau2.runner.get_tasks`, `build_orchestrator`, `run_simulation`）への準拠および実環境接続の実装・検証段階。公式環境の存在・整合性を厳格に確認し、未適合時は `OFFICIAL_BENCHMARK_UNAVAILABLE` または `OFFICIAL_TASKS_EMPTY` を記録して独自シミュレータへの暗黙フォールバックを禁止。
+>    - MBPP 公式 assertion 実行: **【隔離・安定性の検証中】** サブプロセス実行におけるリソース制限（`RLIMIT_AS`, `RLIMIT_CPU`, `PR_SET_NO_NEW_PRIVS`）およびNAS環境のPython起動遅延に対応するタイムアウト調整・一時ディレクトリ分離を実施中。完全なOSコンテナ隔離ではない点を明記。
+> 2. **独自エージェントシミュレータ (Simulated Agent Harness)**: `SimulatedAgentHarnessAdapter`。オフラインでのプロセス分離ソケット通信・動的命令（`bias:partner`, `bias:credit`, `bias:express` 等）による行動制御の検証用。公式ベンチマークの代替ではなく、別系統のシミュレータハーネスとして分離記録。
 > 3. **Mock動作確認**: `--dry_run` による高速パイプライン検証。
 > 4. **実モデル測定**: `--manifest` を指定したGPU環境での実チェックポイント評価。
 

@@ -241,7 +241,7 @@ class GSM8KAdapter(BaseBenchmarkAdapter):
         )
 
 
-def evaluate_mbpp_code_execution(code: str, test_assertions: List[str], timeout: float = 3.0) -> dict:
+def evaluate_mbpp_code_execution(code: str, test_assertions: List[str], timeout: float = 12.0) -> dict:
     """
     生成された Python コードとテスト assertion を安全サンドボックス内で実行し、詳細な実行結果を判定する。
     
@@ -256,6 +256,8 @@ def evaluate_mbpp_code_execution(code: str, test_assertions: List[str], timeout:
     import subprocess
     import sys
     import os
+    import tempfile
+    import shutil
 
     # Markdown コードブロックの抽出
     extracted = code
@@ -291,7 +293,7 @@ def evaluate_mbpp_code_execution(code: str, test_assertions: List[str], timeout:
 
     # サンドボックス隔離ヘッダー（ネットワーク・ファイル破壊・プロセス起動の遮断）
     sandbox_header = (
-        "import sys, builtins\n"
+        "import sys, builtins, os\n"
         "# ネットワーク・外部実行モジュールの完全遮断\n"
         "for m in ['socket', 'subprocess', 'requests', 'urllib', 'http', 'ftplib', 'smtplib', 'shutil', 'asyncio.subprocess']:\n"
         "    sys.modules[m] = None\n\n"
@@ -335,12 +337,16 @@ def evaluate_mbpp_code_execution(code: str, test_assertions: List[str], timeout:
     if "PATH" in os.environ:
         clean_env["PATH"] = os.environ["PATH"]
 
+    # 隔離された一時作業ディレクトリの作成
+    temp_dir = tempfile.mkdtemp(prefix="mbpp_sandbox_")
+
     try:
         proc = subprocess.run(
             [sys.executable, "-I", "-s", "-B", "-c", full_program],
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=temp_dir,
             env=clean_env,
             preexec_fn=_set_resource_limits if os.name != "nt" else None,
         )
@@ -386,9 +392,14 @@ def evaluate_mbpp_code_execution(code: str, test_assertions: List[str], timeout:
             "error_message": f"Execution environment failure: {str(e)}",
             "exit_code": None,
         }
+    finally:
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
-def execute_mbpp_code_safely(code: str, test_assertions: List[str], timeout: float = 3.0) -> bool:
+def execute_mbpp_code_safely(code: str, test_assertions: List[str], timeout: float = 12.0) -> bool:
     """
     生成された Python コードとテスト assertion を安全サンドボックス内で実行し、合否（pass/fail）を判定する。
     下位互換性用ラッパー。
