@@ -50,7 +50,7 @@ def test_mbpp_sandbox_blocks_infinite_loop_and_file_write():
 
 def test_mbpp_valid_solution_passes():
     """MBPP の正しい関数実装を与えた場合、pass@1 > 0 と判定されること"""
-    adapter = MBPPAdapter()
+    adapter = MBPPAdapter(allow_mock=True)
 
     def mock_correct_model(prompt: str) -> str:
         if "min_path" in prompt or "minimum sum of a path in a triangle" in prompt:
@@ -75,7 +75,7 @@ def test_mbpp_valid_solution_passes():
             )
         return "def solution(): return None"
 
-    res = adapter.evaluate_track_a(mock_correct_model, n=2)
+    res = adapter.evaluate_track_a(mock_correct_model, n=2, allow_mock=True)
     assert res.standard_score > 0.0, f"Expected pass@1 > 0, got {res.standard_score}"
 
 

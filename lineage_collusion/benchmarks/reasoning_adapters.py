@@ -315,15 +315,33 @@ def evaluate_mbpp_code_execution(code: str, test_assertions: List[str], timeout:
             resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
             # コアダンプ無効化
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+            # Linux prctl: 新規権限昇格禁止 (PR_SET_NO_NEW_PRIVS = 38)
+            try:
+                import ctypes
+                libc = ctypes.CDLL(None)
+                libc.prctl(38, 1, 0, 0, 0)
+            except Exception:
+                pass
         except Exception:
             pass
 
+    # 高速・隔離実行環境の構築:
+    # NAS (NFS) 環境での重い site-packages 探索による遅延・タイムアウトを防ぐため、
+    # Python 隔離フラグ (-I: isolated, -s: no user site, -B: no .pyc) を付与
+    clean_env = {
+        "PYTHONHASHSEED": "0",
+        "LC_ALL": "C",
+    }
+    if "PATH" in os.environ:
+        clean_env["PATH"] = os.environ["PATH"]
+
     try:
         proc = subprocess.run(
-            [sys.executable, "-c", full_program],
+            [sys.executable, "-I", "-s", "-B", "-c", full_program],
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=clean_env,
             preexec_fn=_set_resource_limits if os.name != "nt" else None,
         )
         if proc.returncode == 0:

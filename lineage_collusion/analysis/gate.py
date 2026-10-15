@@ -673,13 +673,19 @@ def evaluate_e3_cc_gate(
         # 2-4. 4象限判定の確認 (Four-Quadrant Verdict)
         four_q = payload.get("four_quadrants") or {}
         q_name = four_q.get("quadrant") if isinstance(four_q, dict) else None
-        if q_name is not None and q_name != "functional_inheritance":
+        if q_name is None:
+            incomplete = True
+            all_passed = False
+            mechanism_passed = False
+            reasons.append("Four-quadrant mechanism verdict is missing or unobserved")
+            checks["four_quadrants"] = {"passed": False, "observed": False, "status": "MISSING_FOUR_QUADRANTS"}
+        elif q_name != "functional_inheritance":
             all_passed = False
             mechanism_passed = False
             reasons.append(f"Four-quadrant mechanism verdict is '{q_name}' (expected 'functional_inheritance')")
-            checks["four_quadrants"] = {"passed": False, "quadrant": q_name}
-        elif q_name == "functional_inheritance":
-            checks["four_quadrants"] = {"passed": True, "quadrant": q_name}
+            checks["four_quadrants"] = {"passed": False, "observed": True, "quadrant": q_name}
+        else:
+            checks["four_quadrants"] = {"passed": True, "observed": True, "quadrant": q_name}
     else:
         checks["mechanism_skipped"] = {"passed": True, "observed": False}
 

@@ -40,3 +40,32 @@ def test_user_reproduced_e3_gate_issue():
     assert verdict["decision"] == "NO_GO", f"Expected NO_GO but got {verdict['decision']}"
     assert verdict["mechanism_passed"] is False, f"Expected mechanism_passed=False but got {verdict['mechanism_passed']}"
     assert verdict["pass"] is False, f"Expected pass=False but got {verdict['pass']}"
+
+
+def test_user_reproduced_missing_four_quadrants():
+    """
+    ユーザーが指摘した条件:
+    PR = 0.90, CDCR = 0.70, Δ_control = 0.25, PSR = 0.80, CKA = 0.80, four_quadrants = missing
+    期待値:
+    four_quadrants が欠落している場合、自動通過せず NO_GO (INCOMPLETE) かつ mechanism_passed=False
+    """
+    payload = {
+        "persistence_ratio": {"mean_pr": 0.90, "pr_by_target": {}},
+        "cdcr_affected": {"cdcr_micro": 0.70},
+        "cdcr_clean": {"cdcr_micro": 0.10},
+        "delta_control": {"delta_control": 0.25, "status": "OK"},
+        "circuit_inheritance": {
+            "mean_cross_model_patching_psr": 0.80,
+            "mean_subspace_alignment": 0.80,
+        },
+        "representation": {
+            "mean_cka_affected": 0.80,
+        },
+        # four_quadrants は欠落 (missing)
+    }
+
+    verdict = evaluate_e3_cc_gate(payload)
+    assert verdict["decision"] == "NO_GO (INCOMPLETE)", f"Expected NO_GO (INCOMPLETE) but got {verdict['decision']}"
+    assert verdict["mechanism_passed"] is False, f"Expected mechanism_passed=False but got {verdict['mechanism_passed']}"
+    assert verdict["pass"] is False, f"Expected pass=False but got {verdict['pass']}"
+

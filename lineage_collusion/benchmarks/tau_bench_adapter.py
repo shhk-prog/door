@@ -277,30 +277,57 @@ class OfficialTauBenchAdapter(BaseBenchmarkAdapter):
         success_count = 0
         records = []
         try:
-            # 公式 tau2 パッケージによる実評価実行ループ
+            # Sierra 公式 tau2-bench (tau2.runner / build_orchestrator / run_simulation)
             if self.pkg_name == "tau2":
                 import tau2
-                for item in items:
-                    task = item.target_ground_truth
-                    env = tau2.get_env(self.domain)
-                    obs, info = env.reset(task=task)
-                    done = False
-                    steps = 0
-                    while not done and steps < 15:
-                        action_str = model_fn(str(obs))
-                        obs, reward, terminated, truncated, info = env.step(action_str)
-                        done = terminated or truncated
-                        steps += 1
-                    
-                    is_success = bool(info.get("success", False) or (reward is not None and reward > 0.5))
-                    if is_success:
-                        success_count += 1
-                    records.append({
-                        "task_id": item.item_id,
-                        "success": is_success,
-                        "steps": steps,
-                        "reward": reward if 'reward' in locals() else None,
-                    })
+                # 公式 runner API の探索
+                has_official_runner = False
+                try:
+                    from tau2.runner import run_simulation  # type: ignore
+                    from tau2.orchestrator import build_orchestrator  # type: ignore
+                    has_official_runner = True
+                except ImportError:
+                    pass
+
+                if has_official_runner:
+                    for item in items:
+                        task = item.target_ground_truth
+                        orch = build_orchestrator(domain=self.domain, task=task)
+                        sim_res = run_simulation(orchestrator=orch, agent_fn=model_fn)
+                        is_success = bool(getattr(sim_res, "success", False))
+                        if is_success:
+                            success_count += 1
+                        records.append({
+                            "task_id": item.item_id,
+                            "success": is_success,
+                            "sim_result": str(sim_res),
+                        })
+                else:
+                    # 公式 tau2 の対話ステップ実行
+                    for item in items:
+                        task = item.target_ground_truth
+                        env = getattr(tau2, "get_env", lambda d: None)(self.domain)
+                        if env is None:
+                            raise RuntimeError(f"tau2.get_env or tau2.runner not found for domain {self.domain}")
+                        obs, info = env.reset(task=task)
+                        done = False
+                        steps = 0
+                        reward = 0.0
+                        while not done and steps < 15:
+                            action_str = model_fn(str(obs))
+                            obs, reward, terminated, truncated, info = env.step(action_str)
+                            done = terminated or truncated
+                            steps += 1
+                        
+                        is_success = bool(info.get("success", False) or (reward is not None and reward > 0.5))
+                        if is_success:
+                            success_count += 1
+                        records.append({
+                            "task_id": item.item_id,
+                            "success": is_success,
+                            "steps": steps,
+                            "reward": reward,
+                        })
 
             elif self.pkg_name == "tau_bench":
                 from tau_bench.envs import get_env  # type: ignore
@@ -667,7 +694,7 @@ class TauBenchAdapter(BaseBenchmarkAdapter):
         self,
         domain: str = "retail",
         prefer_official: bool = True,
-        enforce_official_evaluator: bool = False,
+        enforce_official_evaluator: bool = True,
     ):
         domain_normalized = domain.lower().strip()
         super().__init__(name=f"tau_bench_{domain_normalized}", category="agent_tool_use")
@@ -707,7 +734,7 @@ class TauBenchAdapter(BaseBenchmarkAdapter):
             res.telemetry["enforce_official_evaluator"] = True
             return res
 
-        # 明示的なシミュレータフォールバック
+        # 明示的なシミュレータフォールバック（enforce_official_evaluator=False の場合のみ）
         res = self.simulated_adapter.evaluate_track_a(model_fn, split=split, n=n)
         res.telemetry["mode"] = "simulated_agent_harness"
         res.telemetry["is_official"] = False
@@ -724,7 +751,35 @@ class TauBenchAdapter(BaseBenchmarkAdapter):
         n: Optional[int] = None,
         clean_baseline_fn: Optional[Callable[[str], str]] = None,
     ) -> BenchmarkResult:
-        # Track B は独自シミュレータハーネス（プロセス隔離ソケット）による介入制御効果の測定
+        if self.use_official:
+            res = self.official_adapter.evaluate_track_b(
+                model_fn=model_fn,
+                command=command,
+                auth=auth,
+                split=split,
+                n=n,
+                clean_baseline_fn=clean_baseline_fn,
+            )
+            res.telemetry["mode"] = "official_tau2_bench"
+            res.telemetry["is_official"] = True
+            return res
+
+        if self.enforce_official_evaluator:
+            # P0-1対応: 公式評価強制モードでは Track B も独自シミュレータに暗黙フォールバックしない
+            res = self.official_adapter.evaluate_track_b(
+                model_fn=model_fn,
+                command=command,
+                auth=auth,
+                split=split,
+                n=n,
+                clean_baseline_fn=clean_baseline_fn,
+            )
+            res.telemetry["mode"] = "official_tau2_enforced_but_unavailable"
+            res.telemetry["is_official"] = True
+            res.telemetry["enforce_official_evaluator"] = True
+            return res
+
+        # 明示的なシミュレータフォールバック（enforce_official_evaluator=False の場合のみ）
         res = self.simulated_adapter.evaluate_track_b(
             model_fn=model_fn,
             command=command,
