@@ -9,6 +9,7 @@ emo2 V3 の Go/No-Go ゲートの移植。E1（RQ1: 継承）が成立しない�
 - 続行判定は decision == "GO" の完全一致のみ
 """
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 H1_KEYS = ("H1_A_Inheritance_OrgA", "H1_B_Inheritance_OrgB")
@@ -19,6 +20,26 @@ REQUIRED_GATE_CONDITIONS = (
     "checkpoint_manifest_hash",
     "execution_mode",
 )
+
+
+def _is_valid_finite(val: Any, min_val: Optional[float] = None, max_val: Optional[float] = None) -> bool:
+    """
+    数値が None でなく、有限（not NaN, not Inf）であり、妥当な値域内にあるか厳格に検証する。
+    無効値（NaN, Inf, -Inf, 範囲外）の場合は False を返す（フェイルクローズ原則）。
+    """
+    if val is None:
+        return False
+    try:
+        f = float(val)
+    except (ValueError, TypeError):
+        return False
+    if math.isnan(f) or math.isinf(f):
+        return False
+    if min_val is not None and f < min_val:
+        return False
+    if max_val is not None and f > max_val:
+        return False
+    return True
 
 DEFAULT_GATE_CFG: Dict[str, Any] = {
     "min_ci_low": 0.05,
@@ -304,10 +325,10 @@ def evaluate_e1_cc_gate(
                 }
                 continue
 
-            ci_passed = float(ci[0]) > float(cfg["min_delta_ci_low"])
-            sel_passed = selectivity is not None and float(selectivity) >= float(cfg["min_selectivity"])
-            bur_passed = float(bur) >= float(cfg["min_bur"])
-            held_passed = float(ccr_held) >= float(cfg["min_compliance_rate"])
+            ci_passed = _is_valid_finite(ci[0], min_val=-1.0, max_val=1.0) and float(ci[0]) > float(cfg["min_delta_ci_low"])
+            sel_passed = _is_valid_finite(selectivity, min_val=0.0, max_val=1.0) and float(selectivity) >= float(cfg["min_selectivity"])
+            bur_passed = _is_valid_finite(bur, min_val=0.0, max_val=1.0) and float(bur) >= float(cfg["min_bur"])
+            held_passed = _is_valid_finite(ccr_held, min_val=0.0, max_val=1.0) and float(ccr_held) >= float(cfg["min_compliance_rate"])
             up_passed = bool(ci_passed and sel_passed and bur_passed and held_passed)
 
             per_model[up_name] = {
@@ -564,12 +585,12 @@ def evaluate_e3_cc_gate(
     # --- 1. 行動継承チェック (Behavioral Inheritance) ---
     pr_summary = payload.get("persistence_ratio") or payload.get("pr") or {}
     mean_pr = pr_summary.get("mean_pr") if isinstance(pr_summary, dict) else None
-    if mean_pr is None:
+    if not _is_valid_finite(mean_pr, min_val=0.0, max_val=1.0):
         incomplete = True
         all_passed = False
-        reasons.append("Persistence Ratio (PR) is unobserved or missing")
-        checks["persistence_ratio"] = {"passed": False, "observed": False, "value": None, "threshold": cfg["min_mean_pr"]}
-    elif mean_pr < float(cfg["min_mean_pr"]):
+        reasons.append(f"Persistence Ratio (PR) is invalid, non-finite (NaN/Inf), or missing: {mean_pr}")
+        checks["persistence_ratio"] = {"passed": False, "observed": False, "value": mean_pr, "threshold": cfg["min_mean_pr"]}
+    elif float(mean_pr) < float(cfg["min_mean_pr"]):
         all_passed = False
         reasons.append(f"Persistence Ratio ({mean_pr}) below threshold ({cfg['min_mean_pr']})")
         checks["persistence_ratio"] = {"passed": False, "observed": True, "value": mean_pr, "threshold": cfg["min_mean_pr"]}
@@ -578,12 +599,12 @@ def evaluate_e3_cc_gate(
 
     cdcr_aff = payload.get("cdcr_affected") or payload.get("cdcr") or {}
     cdcr_val = cdcr_aff.get("cdcr_micro") if isinstance(cdcr_aff, dict) else None
-    if cdcr_val is None:
+    if not _is_valid_finite(cdcr_val, min_val=0.0, max_val=1.0):
         incomplete = True
         all_passed = False
-        reasons.append("CDCR (cross-descendant control rate) is unobserved or missing")
-        checks["cdcr"] = {"passed": False, "observed": False, "value": None, "threshold": cfg["min_cdcr"]}
-    elif cdcr_val < float(cfg["min_cdcr"]):
+        reasons.append(f"CDCR (cross-descendant control rate) is invalid, non-finite (NaN/Inf), or missing: {cdcr_val}")
+        checks["cdcr"] = {"passed": False, "observed": False, "value": cdcr_val, "threshold": cfg["min_cdcr"]}
+    elif float(cdcr_val) < float(cfg["min_cdcr"]):
         all_passed = False
         reasons.append(f"CDCR ({cdcr_val}) below threshold ({cfg['min_cdcr']})")
         checks["cdcr"] = {"passed": False, "observed": True, "value": cdcr_val, "threshold": cfg["min_cdcr"]}
@@ -596,12 +617,12 @@ def evaluate_e3_cc_gate(
     delta_status = delta.get("status") if isinstance(delta, dict) else None
     min_delta = float(cfg.get("min_delta_control", 0.05))
 
-    if delta_val is None or delta_status not in ("OK", None):
+    if not _is_valid_finite(delta_val, min_val=-1.0, max_val=1.0) or delta_status not in ("OK", None):
         incomplete = True
         all_passed = False
-        reasons.append("Δ_control (difference-in-control) is unobserved or missing")
+        reasons.append(f"Δ_control (difference-in-control) is invalid, non-finite (NaN/Inf), or missing: {delta_val} (status={delta_status})")
         checks["delta_control"] = {"passed": False, "observed": False, "value": delta_val, "status": delta_status, "threshold": min_delta}
-    elif delta_val < min_delta:
+    elif float(delta_val) < min_delta:
         all_passed = False
         reasons.append(f"Δ_control ({delta_val}) below threshold ({min_delta})")
         checks["delta_control"] = {"passed": False, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
@@ -636,13 +657,13 @@ def evaluate_e3_cc_gate(
             mechanism_passed = False
             reasons.append("Circuit inheritance causal analysis is empty or unobserved")
             checks["circuit_inheritance"] = {"passed": False, "observed": False, "status": circ.get("status") if isinstance(circ, dict) else "EMPTY"}
-        elif psr_val is None:
+        elif not _is_valid_finite(psr_val, min_val=0.0, max_val=1.0):
             incomplete = True
             all_passed = False
             mechanism_passed = False
-            reasons.append("Causal intervention effect (cross_model_patching_psr) is unobserved in circuit inheritance")
-            checks["circuit_inheritance"] = {"passed": False, "observed": False, "status": "MISSING_PSR"}
-        elif psr_val < min_psr:
+            reasons.append(f"Causal intervention effect PSR is invalid, non-finite (NaN/Inf), or missing: {psr_val}")
+            checks["circuit_inheritance"] = {"passed": False, "observed": False, "value": psr_val, "threshold": min_psr, "status": "INVALID_OR_MISSING_PSR"}
+        elif float(psr_val) < min_psr:
             all_passed = False
             mechanism_passed = False
             reasons.append(f"Causal intervention effect PSR ({psr_val}) below threshold ({min_psr})")
@@ -661,13 +682,13 @@ def evaluate_e3_cc_gate(
             mechanism_passed = False
             reasons.append("Representation similarity (CKA/RSA) is empty or unobserved")
             checks["representation"] = {"passed": False, "observed": False, "status": rep.get("status") if isinstance(rep, dict) else "EMPTY"}
-        elif cka_val is None:
+        elif not _is_valid_finite(cka_val, min_val=0.0, max_val=1.0):
             incomplete = True
             all_passed = False
             mechanism_passed = False
-            reasons.append("Representation similarity CKA is unobserved")
-            checks["representation"] = {"passed": False, "observed": False, "status": "MISSING_CKA"}
-        elif cka_val < min_cka:
+            reasons.append(f"Representation similarity CKA is invalid, non-finite (NaN/Inf), or missing: {cka_val}")
+            checks["representation"] = {"passed": False, "observed": False, "value": cka_val, "threshold": min_cka, "status": "INVALID_OR_MISSING_CKA"}
+        elif float(cka_val) < min_cka:
             all_passed = False
             mechanism_passed = False
             reasons.append(f"Representation similarity CKA ({cka_val}) below threshold ({min_cka})")

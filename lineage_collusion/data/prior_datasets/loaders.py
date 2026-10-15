@@ -60,8 +60,9 @@ def load_agnews(
     n: Optional[int] = 50,
     offset: int = 0,
     force_sample: bool = False,
+    strict_official: bool = False,
 ) -> List[ControlTaskExample]:
-    """AGNews を ControlTaskExample 列として読み込む（offline は同梱サンプル）。"""
+    """AGNews を ControlTaskExample 列として読み込む。strict_official=True 時は公式HF取得失敗時に停止。"""
     id2label = {0: "World", 1: "Sports", 2: "Business", 3: "SciTech"}
 
     def _hf():
@@ -71,7 +72,13 @@ def load_agnews(
         return [(str(offset + i), r["text"], id2label[int(r["label"])]) for i, r in enumerate(ds)]
 
     rows = None if force_sample else _try_hf(_hf)
+    source = "official_hf" if rows else "offline_sample"
     if not rows:
+        if strict_official:
+            raise RuntimeError(
+                f"Official AGNews dataset loading failed under strict_official=True. "
+                f"Fallback to offline sample is prohibited to guarantee paper-grade data integrity."
+            )
         sample_rows = _load_sample("agnews", split=split)
         rows = [(r["id"], r["text"], r["label"]) for r in sample_rows]
         if offset > 0 or n is not None:
@@ -88,6 +95,7 @@ def load_agnews(
         ControlTaskExample(
             example_id=f"agnews_{i}", text=txt, label_set=AGNEWS_LABELS,
             true_label=lab, dataset="agnews", trained_favor_labels=AGNEWS_TRAINED,
+            metadata={"data_source": source},
         )
         for (i, txt, lab) in rows
     ]
@@ -98,8 +106,9 @@ def load_sst2(
     n: Optional[int] = 50,
     offset: int = 0,
     force_sample: bool = False,
+    strict_official: bool = False,
 ) -> List[ControlTaskExample]:
-    """SST-2（GLUE）を ControlTaskExample 列として読み込む（offline は cache/同梱サンプル）。"""
+    """SST-2（GLUE）を ControlTaskExample 列として読み込む。strict_official=True 時は公式HF取得失敗時に停止。"""
     id2label = {0: "negative", 1: "positive"}
 
     def _hf():
@@ -109,7 +118,13 @@ def load_sst2(
         return [(str(offset + i), r["sentence"].strip(), id2label[int(r["label"])]) for i, r in enumerate(ds)]
 
     rows = None if force_sample else _try_hf(_hf)
+    source = "official_hf" if rows else "offline_sample"
     if not rows:
+        if strict_official:
+            raise RuntimeError(
+                f"Official SST-2 dataset loading failed under strict_official=True. "
+                f"Fallback to offline sample is prohibited to guarantee paper-grade data integrity."
+            )
         sample_rows = _load_sample("sst2", split=split)
         rows = [(r["id"], r["text"], r["label"]) for r in sample_rows]
         if offset > 0 or n is not None:
@@ -126,6 +141,7 @@ def load_sst2(
         ControlTaskExample(
             example_id=f"sst2_{i}", text=txt, label_set=SST2_LABELS,
             true_label=lab, dataset="sst2", trained_favor_labels=SST2_TRAINED,
+            metadata={"data_source": source},
         )
         for (i, txt, lab) in rows
     ]

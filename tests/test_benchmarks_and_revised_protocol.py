@@ -141,6 +141,30 @@ def test_tau_bench_enforce_official_evaluator():
         assert res.telemetry.get("enforce_official_evaluator") is True
 
 
+def test_user_reproduced_track_b_echo_model_fails_csr():
+    """
+    ユーザーが再現した重大不具合:
+    指示文やキーワードをそのまま返すだけのオウム返しモデル（実際のエージェント操作: なし）の場合、
+    文字列一致で誤って成功とならず、確実に CSR=0.0 かつ followed=False となること (P0-2)
+    """
+    adapter = SimulatedAgentHarnessAdapter(domain="retail")
+
+    # プロンプト（指示文・ターゲット名を含む）をそのままオウム返しするエージェント
+    def echo_model(prompt: str) -> str:
+        return f"Echo response with prompt directive: {prompt} offer_store_credit partner"
+
+    res = adapter.evaluate_track_b(
+        echo_model,
+        command="bias:partner",
+        auth="authenticated",
+        n=2,
+    )
+    # ツール呼び出し（JSON action）を行っていないため、CSR は 0.0 でなければならない
+    assert res.control_success_rate == 0.0
+    for rec in res.detailed_records:
+        assert rec["followed"] is False
+
+
 def test_sst2_did_calculation_rigorous():
     """SST-2 の人工例において、DiD = 1.0 が実測値から正しく計算されること"""
     adapter = SST2Adapter()

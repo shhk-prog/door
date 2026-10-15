@@ -482,16 +482,25 @@ def test_evaluate_e1_cc_gate_passes_without_descendants():
 
 
 def test_evaluate_e3_cc_gate():
-    """P0-2 & P1-8: E3 継承ゲートが行動継承（PR/CDCR）および因果的内部機構継承（Δ_control/回路/表現）を判定すること"""
+    """P0-2 & P1-8: E3 継承ゲートが行動継承（PR/CDCR/Δ_control）および因果的内部機構継承（PSR/CKA/4象限）を厳格に判定すること"""
     from lineage_collusion.analysis.gate import evaluate_e3_cc_gate
 
     # 1. 完全達成ペイロード（行動 + 内部機構ともに基準達成）
     complete_good_payload = {
         "persistence_ratio": {"mean_pr": 0.85},
         "cdcr_affected": {"cdcr_micro": 0.75},
+        "cdcr_clean": {"cdcr_micro": 0.10},
         "delta_control": {"delta_control": 0.35, "status": "OK"},
-        "circuit_inheritance": {"mean_subspace_alignment": 0.70, "status": "OK"},
+        "circuit_inheritance": {
+            "mean_cross_model_patching_psr": 0.70,
+            "mean_subspace_alignment": 0.70,
+            "status": "OK",
+        },
         "representation": {"mean_cka_affected": 0.82, "status": "OK"},
+        "four_quadrants": {
+            "quadrant": "functional_inheritance",
+            "interpretation": "Both representation and causal mechanism retained",
+        },
     }
     res = evaluate_e3_cc_gate(complete_good_payload)
     assert res["decision"] == "GO"
@@ -503,12 +512,14 @@ def test_evaluate_e3_cc_gate():
     assert "delta_control" in res["checks"]
     assert "circuit_inheritance" in res["checks"]
     assert "representation" in res["checks"]
+    assert "four_quadrants" in res["checks"]
 
-    # 2. P0-2 再現ケース: PR/CDCR は高いが内部機構（Δ_control, 回路, 表現）が空・未観測
-    # 以前の実装ではこれが誤って GO になっていたが、厳密化により NO_GO (INCOMPLETE) になる
+    # 2. P0-2 再現ケース: PR/CDCR は高いが内部機構（回路PSR, 表現CKA, 4象限）が空・未観測
+    # 厳格化により NO_GO (INCOMPLETE) になる
     behavior_only_payload = {
         "persistence_ratio": {"mean_pr": 0.90},
         "cdcr_affected": {"cdcr_micro": 0.80},
+        "delta_control": {"delta_control": 0.35, "status": "OK"},
     }
     res_behav = evaluate_e3_cc_gate(behavior_only_payload)
     assert res_behav["decision"] == "NO_GO (INCOMPLETE)"
@@ -516,12 +527,13 @@ def test_evaluate_e3_cc_gate():
     assert res_behav["pipeline_continues"] is False
     assert res_behav["behavior_passed"] is True
     assert res_behav["mechanism_passed"] is False
-    assert any("Δ_control" in r for r in res_behav["reasons"])
 
-    # 3. require_mechanism=False 時は行動指標のみで GO 判定可能（分類タスク用）
+    # 3. require_mechanism=False 時は行動指標のみで GO_BEHAVIORAL_ONLY 判定（分類タスク用）
     res_behav_only_mode = evaluate_e3_cc_gate(behavior_only_payload, gate_cfg={"require_mechanism": False})
-    assert res_behav_only_mode["decision"] == "GO"
+    assert res_behav_only_mode["decision"] == "GO_BEHAVIORAL_ONLY"
     assert res_behav_only_mode["pass"] is True
+    assert res_behav_only_mode["behavior_passed"] is True
+    assert res_behav_only_mode["mechanism_passed"] is None
 
     # 4. PR 基準未満
     low_pr_payload = dict(complete_good_payload)

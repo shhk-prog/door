@@ -313,11 +313,17 @@ def evaluate_mbpp_code_execution(code: str, test_assertions: List[str], timeout:
     def _set_resource_limits():
         try:
             import resource
-            # ディスクファイル作成・書き込み上限: 0バイト (ファイル作成遮断)
+            # 1. 仮想メモリ上限 (RLIMIT_AS): 1.5GB (1536MB) に制限（暴走防止）
+            mem_limit = 1536 * 1024 * 1024
+            resource.setrlimit(resource.RLIMIT_AS, (mem_limit, mem_limit))
+            # 2. CPU時間上限 (RLIMIT_CPU): タイムアウト+3秒のハードリミット
+            cpu_limit = max(10, int(timeout) + 3)
+            resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
+            # 3. ディスクファイル作成・書き込み上限: 0バイト (ファイル作成遮断)
             resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-            # コアダンプ無効化
+            # 4. コアダンプ無効化
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-            # Linux prctl: 新規権限昇格禁止 (PR_SET_NO_NEW_PRIVS = 38)
+            # 5. Linux prctl: 新規権限昇格禁止 (PR_SET_NO_NEW_PRIVS = 38)
             try:
                 import ctypes
                 libc = ctypes.CDLL(None)

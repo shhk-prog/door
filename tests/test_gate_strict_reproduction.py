@@ -116,3 +116,57 @@ def test_user_reproduced_behavioral_only_success():
     assert verdict["pass"] is True
 
 
+def test_user_reproduced_nan_inputs_rejected_strict():
+    """
+    ユーザーが再現した重大不具合:
+    PR, CDCR, Δ_control, PSR, CKA のすべてに NaN を入力したとき、
+    誤って合格 (GO) とならず、確実に NO_GO (INCOMPLETE) かつ pass=False となること (P0-3)
+    """
+    nan_val = float("nan")
+    payload = {
+        "persistence_ratio": {"mean_pr": nan_val, "pr_by_target": {}},
+        "cdcr_affected": {"cdcr_micro": nan_val},
+        "cdcr_clean": {"cdcr_micro": 0.10},
+        "delta_control": {"delta_control": nan_val, "status": "OK"},
+        "circuit_inheritance": {
+            "mean_cross_model_patching_psr": nan_val,
+            "mean_subspace_alignment": nan_val,
+        },
+        "representation": {
+            "mean_cka_affected": nan_val,
+        },
+        "four_quadrants": {
+            "quadrant": "functional_inheritance",
+        },
+    }
+
+    # require_mechanism=True の場合
+    verdict = evaluate_e3_cc_gate(payload, gate_cfg={"require_mechanism": True})
+    assert verdict["pass"] is False, f"Expected pass=False on NaN inputs but got {verdict['pass']}"
+    assert verdict["decision"] == "NO_GO (INCOMPLETE)", f"Expected NO_GO (INCOMPLETE) but got {verdict['decision']}"
+    assert verdict["behavior_passed"] is False
+    assert verdict["mechanism_passed"] is False
+
+    # require_mechanism=False (Behavioral Only) の場合でも NaN は拒絶
+    verdict_behav = evaluate_e3_cc_gate(payload, gate_cfg={"require_mechanism": False})
+    assert verdict_behav["pass"] is False
+    assert verdict_behav["decision"] == "NO_GO (INCOMPLETE)"
+    assert verdict_behav["behavior_passed"] is False
+
+
+def test_user_reproduced_inf_inputs_rejected_strict():
+    """
+    Inf や -Inf などの非有限値が入力された場合も即座に拒絶されること
+    """
+    inf_val = float("inf")
+    payload = {
+        "persistence_ratio": {"mean_pr": inf_val},
+        "cdcr_affected": {"cdcr_micro": 0.70},
+        "delta_control": {"delta_control": float("-inf")},
+    }
+    verdict = evaluate_e3_cc_gate(payload, gate_cfg={"require_mechanism": False})
+    assert verdict["pass"] is False
+    assert verdict["decision"] == "NO_GO (INCOMPLETE)"
+
+
+
