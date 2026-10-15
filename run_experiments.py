@@ -1789,25 +1789,29 @@ def stage_pc_e3(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, registry) -> Di
         cln_fn = cln_first[0] if cln_first else None
 
         if desc_fn:
+            bench_n_gsm = 10 if args.dry_run else getattr(args, "benchmark_n", None)
+            bench_n_mbpp = 5 if args.dry_run else getattr(args, "benchmark_n", None)
+            allow_mock = bool(args.dry_run)
+
             # GSM8K
-            gsm8k = GSM8KAdapter()
-            gsm_a = gsm8k.evaluate_track_a(desc_fn, n=10)
-            gsm_b = gsm8k.evaluate_track_b(desc_fn, clean_baseline_fn=cln_fn, n=10)
+            gsm8k = GSM8KAdapter(allow_mock=allow_mock)
+            gsm_a = gsm8k.evaluate_track_a(desc_fn, n=bench_n_gsm, allow_mock=allow_mock)
+            gsm_b = gsm8k.evaluate_track_b(desc_fn, clean_baseline_fn=cln_fn, n=bench_n_gsm, allow_mock=allow_mock)
             write_json(stage_dir / "gsm8k_track_a.json", gsm_a.to_dict())
             write_json(stage_dir / "gsm8k_track_b.json", gsm_b.to_dict())
             reasoning_results["gsm8k_track_a"] = gsm_a.to_dict()
             reasoning_results["gsm8k_track_b"] = gsm_b.to_dict()
 
             # MBPP (公式テスト安全隔離実行による pass@1 厳密検証)
-            mbpp = MBPPAdapter()
-            mbpp_a = mbpp.evaluate_track_a(desc_fn, n=5)
-            mbpp_b = mbpp.evaluate_track_b(desc_fn, clean_baseline_fn=cln_fn, n=5)
+            mbpp = MBPPAdapter(allow_mock=allow_mock)
+            mbpp_a = mbpp.evaluate_track_a(desc_fn, n=bench_n_mbpp, allow_mock=allow_mock)
+            mbpp_b = mbpp.evaluate_track_b(desc_fn, clean_baseline_fn=cln_fn, n=bench_n_mbpp, allow_mock=allow_mock)
             write_json(stage_dir / "mbpp_track_a.json", mbpp_a.to_dict())
             write_json(stage_dir / "mbpp_track_b.json", mbpp_b.to_dict())
             reasoning_results["mbpp_track_a"] = mbpp_a.to_dict()
             reasoning_results["mbpp_track_b"] = mbpp_b.to_dict()
-            console.print(f"[cyan]GSM8K Track A (EM):[/cyan] {gsm_a.standard_score}  |  "
-                          f"[cyan]MBPP Track A (pass@1):[/cyan] {mbpp_a.standard_score}")
+            console.print(f"[cyan]GSM8K Track A (EM):[/cyan] {gsm_a.standard_score} (samples={gsm_a.num_samples})  |  "
+                          f"[cyan]MBPP Track A (pass@1):[/cyan] {mbpp_a.standard_score} (samples={mbpp_a.num_samples})")
             write_json(stage_dir / "reasoning_benchmarks_summary.json", reasoning_results)
     except Exception as e:
         console.print(f"[yellow]推論ベンチマーク実行中の警告: {e}[/yellow]")
@@ -1822,9 +1826,8 @@ def stage_pc_e3(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, registry) -> Di
         # 因果的保持の判定: 幾何学的指標(Subspace Alignment)ではなく、
         # 実際に測定された Activation Patching 因果介入効果 (PSR: Patching Success Rate) を用いる
         mean_psr = circ.get("mean_cross_model_patching_psr")
-        if mean_psr is None or mean_psr == 0.0:
-            mean_psr = circ.get("mean_causal_effect_similarity")
-        # デフォルト閾値: PSR >= 0.5 で因果効果保持と判定
+        # P0-3対応: PSRが0のときに mean_causal_effect_similarity で代用する混同を撤廃。
+        # 介入成功率(PSR)と層別因果効果類似性は定義も分布も異なる別指標であるため、PSR実測値のみで評価する。
         causal_retained = bool(mean_psr is not None and mean_psr >= 0.5)
 
         four_quadrants = evaluate_e3_mechanism_four_quadrants(
@@ -1838,6 +1841,7 @@ def stage_pc_e3(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, registry) -> Di
             "causal_effect_retained": causal_retained,
             "mean_subspace_alignment_geometric_auxiliary": circ.get("mean_subspace_alignment"),
             "mean_circuit_jaccard_overlap": circ.get("mean_circuit_jaccard_overlap"),
+            "mean_causal_effect_similarity_auxiliary": circ.get("mean_causal_effect_similarity"),
         }
         write_json(stage_dir / "e3_four_quadrants.json", four_quadrants)
         console.print(f"[bold cyan]E3 4象限判定:[/bold cyan] {four_quadrants['quadrant']} ({four_quadrants['interpretation']})  "
@@ -1990,22 +1994,31 @@ def stage_pc_e4(exp_mgr, cc_scenarios, mset, out_dir, args, cfg) -> Dict[str, An
             d_psr = None
             if pair_key_candidates:
                 d_psr = e3_circ_data["descendant_pairs"][pair_key_candidates[0]].get("cross_model_patching_psr")
-            if d_psr is None:
-                d_psr = e3_circ_data.get("mean_cross_model_patching_psr")
-            if d_psr is None and args.dry_run:
-                d_psr = 0.8  # dry-run 既定値
 
-            causal_retained = bool(d_psr is not None and d_psr >= 0.5)
+            # P1対応: 全体平均代用や dry-run での 0.8 固定値代入を撤廃。
+            # 派生モデル別の因果効果が欠測した場合は断定せず、未測定 (unobserved_or_unmeasured) として扱う
             e4_csr = res_b.control_success_rate or 0.0
             e4_std_success = res_b.standard_score or 0.0
             e4_ctrl_success = bool(e4_csr >= 0.5)
 
-            align_rec = evaluate_e3_e4_alignment_matrix(
-                e3_causal_retained=causal_retained,
-                e4_control_success=e4_ctrl_success,
-                e4_csr=e4_csr,
-                e4_std_task_success=e4_std_success,
-            )
+            if d_psr is None:
+                align_rec = {
+                    "category": "unobserved_or_unmeasured",
+                    "interpretation": "Causal mechanism PSR not observed for this specific descendant model",
+                    "e3_causal_retained": None,
+                    "e4_control_success": e4_ctrl_success,
+                    "e4_csr": e4_csr,
+                    "e4_std_task_success": e4_std_success,
+                }
+            else:
+                causal_retained = bool(d_psr >= 0.5)
+                align_rec = evaluate_e3_e4_alignment_matrix(
+                    e3_causal_retained=causal_retained,
+                    e4_control_success=e4_ctrl_success,
+                    e4_csr=e4_csr,
+                    e4_std_task_success=e4_std_success,
+                )
+
             align_rec["ft_type"] = ft_type
             align_rec["causal_psr"] = d_psr
             alignment_summary["descendant_alignments"][d_name] = align_rec
@@ -2415,6 +2428,12 @@ def main():
     )
     parser.add_argument("--dry_run", action="store_true", help="Mockモデルによるパイプライン検証")
     parser.add_argument("--manifest", type=str, default=None, help="実チェックポイント台帳 (manifest.json) パス")
+    parser.add_argument(
+        "--benchmark_n",
+        type=int,
+        default=None,
+        help="標準ベンチマーク (GSM8K/MBPP) の評価件数上限 (未指定時は全件。dry_run時は自動で小規模)",
+    )
     parser.add_argument(
         "--e2_communication_history",
         type=str,

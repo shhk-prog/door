@@ -549,6 +549,8 @@ def evaluate_e3_cc_gate(
         "min_mean_pr": 0.50,
         "min_cdcr": 0.20,
         "min_delta_control": 0.05,
+        "min_cross_model_patching_psr": 0.50,
+        "min_cka": 0.30,
         "require_mechanism": True,
         "outcome": "hard",
         **(gate_cfg or {}),
@@ -614,27 +616,70 @@ def evaluate_e3_cc_gate(
         else:
             checks["delta_control"] = {"passed": True, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
 
-        # 2-2. 回路因果介入 (circuit_inheritance)
+        # 2-2. 回路因果介入 (circuit_inheritance: Activation Patching PSR)
         circ = payload.get("circuit_inheritance") or {}
+        min_psr = float(cfg.get("min_cross_model_patching_psr", 0.50))
+        psr_val = None
+        if isinstance(circ, dict):
+            psr_val = circ.get("mean_cross_model_patching_psr")
+            if psr_val is None:
+                psr_val = circ.get("cross_patching_psr")
+
         if not circ or (isinstance(circ, dict) and circ.get("status") in ("ERROR", "MISSING")):
             incomplete = True
             all_passed = False
             mechanism_passed = False
             reasons.append("Circuit inheritance causal analysis is empty or unobserved")
             checks["circuit_inheritance"] = {"passed": False, "observed": False, "status": circ.get("status") if isinstance(circ, dict) else "EMPTY"}
+        elif psr_val is None:
+            incomplete = True
+            all_passed = False
+            mechanism_passed = False
+            reasons.append("Causal intervention effect (cross_model_patching_psr) is unobserved in circuit inheritance")
+            checks["circuit_inheritance"] = {"passed": False, "observed": False, "status": "MISSING_PSR"}
+        elif psr_val < min_psr:
+            all_passed = False
+            mechanism_passed = False
+            reasons.append(f"Causal intervention effect PSR ({psr_val}) below threshold ({min_psr})")
+            checks["circuit_inheritance"] = {"passed": False, "observed": True, "value": psr_val, "threshold": min_psr, "alignment": circ.get("mean_subspace_alignment")}
         else:
-            checks["circuit_inheritance"] = {"passed": True, "observed": True, "alignment": circ.get("mean_subspace_alignment")}
+            checks["circuit_inheritance"] = {"passed": True, "observed": True, "value": psr_val, "threshold": min_psr, "alignment": circ.get("mean_subspace_alignment")}
 
-        # 2-3. 表現類似性 (representation)
+        # 2-3. 表現類似性 (representation: CKA)
         rep = payload.get("representation") or {}
+        min_cka = float(cfg.get("min_cka", 0.30))
+        cka_val = rep.get("mean_cka_affected") if isinstance(rep, dict) else None
+
         if not rep or (isinstance(rep, dict) and rep.get("status") in ("ERROR", "MISSING")):
             incomplete = True
             all_passed = False
             mechanism_passed = False
             reasons.append("Representation similarity (CKA/RSA) is empty or unobserved")
             checks["representation"] = {"passed": False, "observed": False, "status": rep.get("status") if isinstance(rep, dict) else "EMPTY"}
+        elif cka_val is None:
+            incomplete = True
+            all_passed = False
+            mechanism_passed = False
+            reasons.append("Representation similarity CKA is unobserved")
+            checks["representation"] = {"passed": False, "observed": False, "status": "MISSING_CKA"}
+        elif cka_val < min_cka:
+            all_passed = False
+            mechanism_passed = False
+            reasons.append(f"Representation similarity CKA ({cka_val}) below threshold ({min_cka})")
+            checks["representation"] = {"passed": False, "observed": True, "value": cka_val, "threshold": min_cka}
         else:
-            checks["representation"] = {"passed": True, "observed": True, "cka_affected": rep.get("mean_cka_affected")}
+            checks["representation"] = {"passed": True, "observed": True, "value": cka_val, "threshold": min_cka}
+
+        # 2-4. 4象限判定の確認 (Four-Quadrant Verdict)
+        four_q = payload.get("four_quadrants") or {}
+        q_name = four_q.get("quadrant") if isinstance(four_q, dict) else None
+        if q_name is not None and q_name != "functional_inheritance":
+            all_passed = False
+            mechanism_passed = False
+            reasons.append(f"Four-quadrant mechanism verdict is '{q_name}' (expected 'functional_inheritance')")
+            checks["four_quadrants"] = {"passed": False, "quadrant": q_name}
+        elif q_name == "functional_inheritance":
+            checks["four_quadrants"] = {"passed": True, "quadrant": q_name}
     else:
         checks["mechanism_skipped"] = {"passed": True, "observed": False}
 

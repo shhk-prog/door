@@ -1,0 +1,42 @@
+import pytest
+from lineage_collusion.analysis.gate import evaluate_e3_cc_gate
+
+def test_user_reproduced_e3_gate_issue():
+    """
+    ユーザーが再現した人工条件:
+    Persistence Ratio: 0.90
+    CDCR: 0.70
+    Δ_control: 0.25
+    Cross-model Patching PSR: 0.00
+    CKA: 0.00
+    4象限判定: extinction_or_failure
+
+    期待値:
+    decision == "NO_GO"
+    mechanism_passed == False
+    pass == False
+    """
+    payload = {
+        "persistence_ratio": {"mean_pr": 0.90, "pr_by_target": {}},
+        "cdcr_affected": {"cdcr_micro": 0.70},
+        "cdcr_clean": {"cdcr_micro": 0.10},
+        "delta_control": {"delta_control": 0.25, "status": "OK"},
+        "circuit_inheritance": {
+            "mean_cross_model_patching_psr": 0.00,
+            "mean_subspace_alignment": 0.00,
+        },
+        "representation": {
+            "mean_cka_affected": 0.00,
+        },
+        "four_quadrants": {
+            "quadrant": "extinction_or_failure",
+            "interpretation": "Neither representation nor causal mechanism retained",
+        },
+    }
+
+    verdict = evaluate_e3_cc_gate(payload)
+
+    print("Verdict:", verdict)
+    assert verdict["decision"] == "NO_GO", f"Expected NO_GO but got {verdict['decision']}"
+    assert verdict["mechanism_passed"] is False, f"Expected mechanism_passed=False but got {verdict['mechanism_passed']}"
+    assert verdict["pass"] is False, f"Expected pass=False but got {verdict['pass']}"

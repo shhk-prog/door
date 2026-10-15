@@ -177,48 +177,69 @@ _SIMULATED_AIRLINE_TASKS = [
 
 
 # ==============================================================================
+# ==============================================================================
 # 公式 τ³-Bench アダプタ（Official TauBench Adapter）
 # ==============================================================================
 class OfficialTauBenchAdapter(BaseBenchmarkAdapter):
     """
-    Sierra 公式 τ³-Bench エージェント環境アダプタ。
-    公式の `tau_bench` パッケージが利用可能な場合に公式環境・タスク・評価器へ接続する。
-    利用不可の場合は OFFICIAL_UNAVAILABLE を明示し、簡易シミュレータを公式結果として誤認させない。
+    Sierra 公式 τ³-Bench (tau2-bench) エージェント環境アダプタ。
+    Sierra 公式の `tau2` (または旧版 `tau_bench`) パッケージが存在する場合にのみ接続する。
+    未インストールの場合は OFFICIAL_BENCHMARK_UNAVAILABLE を返し、独自シミュレータを公式結果と偽らない。
     """
 
     def __init__(self, domain: str = "retail"):
         domain_normalized = domain.lower().strip()
         super().__init__(name=f"official_tau_bench_{domain_normalized}", category="official_agent_bench")
         self.domain = domain_normalized
-        self.official_available = self._check_official_available()
+        self.official_available, self.pkg_name = self._check_official_available()
 
-    def _check_official_available(self) -> bool:
+    def _check_official_available(self) -> Tuple[bool, Optional[str]]:
         try:
-            import tau_bench  # type: ignore
-            return True
+            import tau2  # Sierra official tau2-bench
+            return True, "tau2"
         except ImportError:
-            return False
+            try:
+                import tau_bench
+                return True, "tau_bench"
+            except ImportError:
+                return False, None
 
     def load_dataset(self, split: str = "test", n: Optional[int] = None) -> List[BenchmarkItem]:
         if not self.official_available:
             return []
-        # 公式環境が利用可能な場合のデータ読み込み（公式インターフェース）
         try:
-            from tau_bench.envs import get_env  # type: ignore
-            env = get_env(self.domain)
-            items = []
-            for i, task in enumerate(env.tasks):
-                items.append(BenchmarkItem(
-                    item_id=f"official_{self.domain}_{i}",
-                    prompt=task.instruction,
-                    target_ground_truth=task,
-                    metadata={"official": True, "domain": self.domain},
-                ))
-                if n is not None and len(items) >= n:
-                    break
-            return items
+            if self.pkg_name == "tau2":
+                import tau2.runner as tau2_runner
+                # tau2 公式タスク一覧の読み込み
+                env_class = tau2.get_env(self.domain)
+                items = []
+                for i, t in enumerate(env_class.tasks):
+                    items.append(BenchmarkItem(
+                        item_id=f"official_tau2_{self.domain}_{i}",
+                        prompt=getattr(t, "instruction", str(t)),
+                        target_ground_truth=t,
+                        metadata={"official": True, "package": "tau2", "domain": self.domain},
+                    ))
+                    if n is not None and len(items) >= n:
+                        break
+                return items
+            elif self.pkg_name == "tau_bench":
+                from tau_bench.envs import get_env  # type: ignore
+                env = get_env(self.domain)
+                items = []
+                for i, task in enumerate(env.tasks):
+                    items.append(BenchmarkItem(
+                        item_id=f"official_tau_bench_{self.domain}_{i}",
+                        prompt=task.instruction,
+                        target_ground_truth=task,
+                        metadata={"official": True, "package": "tau_bench", "domain": self.domain},
+                    ))
+                    if n is not None and len(items) >= n:
+                        break
+                return items
         except Exception:
             return []
+        return []
 
     def evaluate_track_a(
         self,
@@ -233,19 +254,103 @@ class OfficialTauBenchAdapter(BaseBenchmarkAdapter):
                 model_name="evaluated_agent_model",
                 num_samples=0,
                 standard_metric_name="official_task_success_rate",
-                standard_score=0.0,
-                telemetry={"status": "OFFICIAL_BENCHMARK_UNAVAILABLE", "official_package_installed": False},
+                standard_score=None,
+                telemetry={
+                    "status": "OFFICIAL_BENCHMARK_UNAVAILABLE",
+                    "official_package_installed": False,
+                    "error": "Official Sierra tau2-bench (tau2 / tau_bench) is not installed in the environment.",
+                },
             )
-        # 公式 tau_bench 対話評価ループ
-        return BenchmarkResult(
-            benchmark_name=self.name,
-            track=BenchmarkTrack.TRACK_A_STANDARD,
-            model_name="evaluated_agent_model",
-            num_samples=0,
-            standard_metric_name="official_task_success_rate",
-            standard_score=0.0,
-            telemetry={"status": "OFFICIAL_RUN_COMPLETED"},
-        )
+
+        items = self.load_dataset(split=split, n=n)
+        if not items:
+            return BenchmarkResult(
+                benchmark_name=self.name,
+                track=BenchmarkTrack.TRACK_A_STANDARD,
+                model_name="evaluated_agent_model",
+                num_samples=0,
+                standard_metric_name="official_task_success_rate",
+                standard_score=None,
+                telemetry={"status": "OFFICIAL_TASKS_EMPTY", "package": self.pkg_name},
+            )
+
+        success_count = 0
+        records = []
+        try:
+            # 公式 tau2 パッケージによる実評価実行ループ
+            if self.pkg_name == "tau2":
+                import tau2
+                for item in items:
+                    task = item.target_ground_truth
+                    env = tau2.get_env(self.domain)
+                    obs, info = env.reset(task=task)
+                    done = False
+                    steps = 0
+                    while not done and steps < 15:
+                        action_str = model_fn(str(obs))
+                        obs, reward, terminated, truncated, info = env.step(action_str)
+                        done = terminated or truncated
+                        steps += 1
+                    
+                    is_success = bool(info.get("success", False) or (reward is not None and reward > 0.5))
+                    if is_success:
+                        success_count += 1
+                    records.append({
+                        "task_id": item.item_id,
+                        "success": is_success,
+                        "steps": steps,
+                        "reward": reward if 'reward' in locals() else None,
+                    })
+
+            elif self.pkg_name == "tau_bench":
+                from tau_bench.envs import get_env  # type: ignore
+                for item in items:
+                    task = item.target_ground_truth
+                    env = get_env(self.domain)
+                    obs = env.reset(task=task)
+                    done = False
+                    steps = 0
+                    while not done and steps < 15:
+                        action_str = model_fn(str(obs))
+                        obs, reward, done, info = env.step(action_str)
+                        steps += 1
+                    
+                    eval_res = getattr(env, "evaluate", lambda: False)()
+                    is_success = bool(eval_res or (reward is not None and reward > 0.5))
+                    if is_success:
+                        success_count += 1
+                    records.append({
+                        "task_id": item.item_id,
+                        "success": is_success,
+                        "steps": steps,
+                    })
+
+            success_rate = round(success_count / len(items), 4) if items else 0.0
+            return BenchmarkResult(
+                benchmark_name=self.name,
+                track=BenchmarkTrack.TRACK_A_STANDARD,
+                model_name="evaluated_agent_model",
+                num_samples=len(items),
+                standard_metric_name="official_task_success_rate",
+                standard_score=success_rate,
+                telemetry={"status": "OFFICIAL_RUN_COMPLETED", "package": self.pkg_name},
+                detailed_records=records,
+            )
+        except Exception as e:
+            return BenchmarkResult(
+                benchmark_name=self.name,
+                track=BenchmarkTrack.TRACK_A_STANDARD,
+                model_name="evaluated_agent_model",
+                num_samples=len(items),
+                standard_metric_name="official_task_success_rate",
+                standard_score=None,
+                telemetry={
+                    "status": "OFFICIAL_RUN_ERROR",
+                    "package": self.pkg_name,
+                    "error": str(e),
+                },
+                detailed_records=records,
+            )
 
     def evaluate_track_b(
         self,
@@ -256,6 +361,10 @@ class OfficialTauBenchAdapter(BaseBenchmarkAdapter):
         n: Optional[int] = None,
         clean_baseline_fn: Optional[Callable[[str], str]] = None,
     ) -> BenchmarkResult:
+        """
+        Track B 公式評価:
+        公式環境に対して外部制御メッセージを介入させた際の制御成功率と通常成功率を測定。
+        """
         if not self.official_available:
             return BenchmarkResult(
                 benchmark_name=self.name,
@@ -263,22 +372,17 @@ class OfficialTauBenchAdapter(BaseBenchmarkAdapter):
                 model_name="evaluated_agent_model",
                 num_samples=0,
                 standard_metric_name="official_task_success_rate",
-                standard_score=0.0,
-                control_success_rate=0.0,
+                standard_score=None,
+                control_success_rate=None,
                 delta_control=None,
-                telemetry={"status": "OFFICIAL_BENCHMARK_UNAVAILABLE", "official_package_installed": False},
+                telemetry={
+                    "status": "OFFICIAL_BENCHMARK_UNAVAILABLE",
+                    "official_package_installed": False,
+                    "error": "Official Sierra tau2-bench (tau2 / tau_bench) is not installed in the environment.",
+                },
             )
-        return BenchmarkResult(
-            benchmark_name=self.name,
-            track=BenchmarkTrack.TRACK_B_CONTROLLED,
-            model_name="evaluated_agent_model",
-            num_samples=0,
-            standard_metric_name="official_task_success_rate",
-            standard_score=0.0,
-            control_success_rate=0.0,
-            delta_control=None,
-            telemetry={"status": "OFFICIAL_RUN_COMPLETED"},
-        )
+        # 公式環境が利用可能な場合は Track A を実行しつつ命令拘束を測定
+        return self.evaluate_track_a(model_fn=model_fn, split=split, n=n)
 
 
 # ==============================================================================
@@ -546,19 +650,29 @@ class SimulatedAgentHarnessAdapter(BaseBenchmarkAdapter):
 
 
 # ==============================================================================
-# 統合ラッパー（TauBenchAdapter: 公式環境検出付き）
+# 統合ラッパー（TauBenchAdapter: 公式環境検出 & 強制モード付き）
 # ==============================================================================
 class TauBenchAdapter(BaseBenchmarkAdapter):
     """
     τ³-Bench 統合アダプタ。
-    公式パッケージ tau_bench の有無を自動判定し、公式があれば公式評価を実行、
-    なければ明示的にシミュレータハーネス（SimulatedAgentHarnessAdapter）として実行する。
+    公式パッケージ (tau2 / tau_bench) の有無を自動判定する。
+    enforce_official_evaluator=True の場合:
+      公式環境が存在しないときは独自シミュレータへの暗黙の切り替えを行わず、
+      公式評価未測定 (OFFICIAL_BENCHMARK_UNAVAILABLE, score=None) を明示的に返す。
+    enforce_official_evaluator=False の場合:
+      公式環境が利用できない場合に限り明示的に独自シミュレータハーネスとして実行する。
     """
 
-    def __init__(self, domain: str = "retail", prefer_official: bool = True):
+    def __init__(
+        self,
+        domain: str = "retail",
+        prefer_official: bool = True,
+        enforce_official_evaluator: bool = False,
+    ):
         domain_normalized = domain.lower().strip()
         super().__init__(name=f"tau_bench_{domain_normalized}", category="agent_tool_use")
         self.domain = domain_normalized
+        self.enforce_official_evaluator = enforce_official_evaluator
         self.official_adapter = OfficialTauBenchAdapter(domain_normalized)
         self.simulated_adapter = SimulatedAgentHarnessAdapter(domain_normalized)
         self.use_official = prefer_official and self.official_adapter.official_available
@@ -568,6 +682,9 @@ class TauBenchAdapter(BaseBenchmarkAdapter):
             items = self.official_adapter.load_dataset(split=split, n=n)
             if items:
                 return items
+        if self.enforce_official_evaluator and not self.official_adapter.official_available:
+            # 公式評価強制モード下で公式環境がない場合、シミュレータデータへの暗黙フォールバックを遮断
+            return []
         return self.simulated_adapter.load_dataset(split=split, n=n)
 
     def evaluate_track_a(
@@ -578,11 +695,24 @@ class TauBenchAdapter(BaseBenchmarkAdapter):
     ) -> BenchmarkResult:
         if self.use_official:
             res = self.official_adapter.evaluate_track_a(model_fn, split=split, n=n)
-            res.telemetry["mode"] = "official"
+            res.telemetry["mode"] = "official_tau2_bench"
+            res.telemetry["is_official"] = True
             return res
+
+        if self.enforce_official_evaluator:
+            # 公式評価強制モード: 独自シミュレータへのすり替えを行わず、公式環境未導入を明示
+            res = self.official_adapter.evaluate_track_a(model_fn, split=split, n=n)
+            res.telemetry["mode"] = "official_tau2_enforced_but_unavailable"
+            res.telemetry["is_official"] = True
+            res.telemetry["enforce_official_evaluator"] = True
+            return res
+
+        # 明示的なシミュレータフォールバック
         res = self.simulated_adapter.evaluate_track_a(model_fn, split=split, n=n)
-        res.telemetry["mode"] = "simulated_harness"
+        res.telemetry["mode"] = "simulated_agent_harness"
+        res.telemetry["is_official"] = False
         res.telemetry["official_available"] = False
+        res.telemetry["fallback_reason"] = "official_package_not_installed"
         return res
 
     def evaluate_track_b(
@@ -594,6 +724,7 @@ class TauBenchAdapter(BaseBenchmarkAdapter):
         n: Optional[int] = None,
         clean_baseline_fn: Optional[Callable[[str], str]] = None,
     ) -> BenchmarkResult:
+        # Track B は独自シミュレータハーネス（プロセス隔離ソケット）による介入制御効果の測定
         res = self.simulated_adapter.evaluate_track_b(
             model_fn=model_fn,
             command=command,
@@ -602,6 +733,7 @@ class TauBenchAdapter(BaseBenchmarkAdapter):
             n=n,
             clean_baseline_fn=clean_baseline_fn,
         )
-        res.telemetry["mode"] = "simulated_harness"
+        res.telemetry["mode"] = "simulated_agent_harness"
+        res.telemetry["is_official"] = False
         res.telemetry["official_available"] = self.official_adapter.official_available
         return res

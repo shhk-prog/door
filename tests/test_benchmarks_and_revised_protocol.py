@@ -128,7 +128,17 @@ def test_official_tau_bench_separation():
     res = official.evaluate_track_a(lambda p: '{"action": "initiate_return"}')
     if not official.official_available:
         assert res.telemetry.get("status") == "OFFICIAL_BENCHMARK_UNAVAILABLE"
-        assert res.standard_score == 0.0
+        assert res.standard_score is None
+
+
+def test_tau_bench_enforce_official_evaluator():
+    """enforce_official_evaluator=True の場合、公式未導入時に独自シミュレータに暗黙フォールバックしないこと"""
+    adapter = TauBenchAdapter(domain="retail", enforce_official_evaluator=True)
+    if not adapter.official_adapter.official_available:
+        res = adapter.evaluate_track_a(lambda p: '{"action": "initiate_return"}')
+        assert res.standard_score is None
+        assert res.telemetry.get("status") == "OFFICIAL_BENCHMARK_UNAVAILABLE"
+        assert res.telemetry.get("enforce_official_evaluator") is True
 
 
 def test_sst2_did_calculation_rigorous():
@@ -175,3 +185,34 @@ def test_e3_e4_alignment_matrix():
         e4_std_task_success=0.80,
     )
     assert res1["category"] == "supported_inheritance_and_control"
+
+
+def test_user_reproduced_e3_gate_issue_in_suite():
+    """
+    ユーザーが再現した人工条件での厳密判定テスト:
+    PR=0.90, CDCR=0.70, Δ_control=0.25, PSR=0.00, CKA=0.00, 4象限=extinction_or_failure
+    必ず NO_GO かつ mechanism_passed=False となること
+    """
+    from lineage_collusion.analysis.gate import evaluate_e3_cc_gate
+    payload = {
+        "persistence_ratio": {"mean_pr": 0.90, "pr_by_target": {}},
+        "cdcr_affected": {"cdcr_micro": 0.70},
+        "cdcr_clean": {"cdcr_micro": 0.10},
+        "delta_control": {"delta_control": 0.25, "status": "OK"},
+        "circuit_inheritance": {
+            "mean_cross_model_patching_psr": 0.00,
+            "mean_subspace_alignment": 0.00,
+        },
+        "representation": {
+            "mean_cka_affected": 0.00,
+        },
+        "four_quadrants": {
+            "quadrant": "extinction_or_failure",
+            "interpretation": "Neither representation nor causal mechanism retained",
+        },
+    }
+
+    verdict = evaluate_e3_cc_gate(payload)
+    assert verdict["decision"] == "NO_GO"
+    assert verdict["mechanism_passed"] is False
+    assert verdict["pass"] is False
