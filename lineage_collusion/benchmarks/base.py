@@ -47,6 +47,16 @@ class BenchmarkResult:
     telemetry: Dict[str, Any] = field(default_factory=dict)
     detailed_records: List[Dict[str, Any]] = field(default_factory=list)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """JSONシリアライズ可能な辞書表現を返す"""
+        from dataclasses import asdict
+        d = asdict(self)
+        if isinstance(d.get("track"), Enum):
+            d["track"] = d["track"].value
+        elif isinstance(self.track, Enum):
+            d["track"] = self.track.value
+        return d
+
 
 class BaseBenchmarkAdapter(ABC):
     """ベンチマークアダプタ基底クラス"""

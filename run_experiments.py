@@ -1550,8 +1550,41 @@ def stage_pc_e1(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, finalize_fn, re
     else:
         console.print("[yellow]PC-E1 Gate NO-GO のため内部機構解析をスキップ（--force_after_no_go で続行可）。[/yellow]")
 
+    # Layer A: 標準ベンチマーク（SST-2 / AG News）の Track A (公式性能) / Track B (制御・DiD) 実測
+    bench_results = {}
+    try:
+        from lineage_collusion.benchmarks.classification_adapters import SST2Adapter, AGNewsAdapter
+        up_key = next((k for k, v in cc_models.items() if v[2].get("model_role") in ("upstream", "descendant")), None)
+        cln_key = next((k for k, v in cc_models.items() if v[2].get("model_role") == "clean_control"), None)
+        if up_key:
+            up_fn = cc_models[up_key][0]
+            cln_fn = cc_models[cln_key][0] if cln_key else None
+            # SST-2
+            sst2 = SST2Adapter()
+            s_a = sst2.evaluate_track_a(up_fn, n=20)
+            s_b = sst2.evaluate_track_b(up_fn, clean_baseline_fn=cln_fn, n=20)
+            write_json(stage_dir / "sst2_track_a.json", s_a.to_dict())
+            write_json(stage_dir / "sst2_track_b.json", s_b.to_dict())
+            bench_results["sst2_track_a"] = s_a.to_dict()
+            bench_results["sst2_track_b"] = s_b.to_dict()
+            console.print(f"[cyan]SST-2 Track A (Accuracy):[/cyan] {s_a.standard_score}  |  "
+                          f"[cyan]Track B (CSR):[/cyan] {s_b.control_success_rate}  Δ_control={s_b.delta_control}")
+            # AG News
+            ag = AGNewsAdapter()
+            ag_a = ag.evaluate_track_a(up_fn, n=20)
+            ag_b = ag.evaluate_track_b(up_fn, clean_baseline_fn=cln_fn, n=20)
+            write_json(stage_dir / "agnews_track_a.json", ag_a.to_dict())
+            write_json(stage_dir / "agnews_track_b.json", ag_b.to_dict())
+            bench_results["agnews_track_a"] = ag_a.to_dict()
+            bench_results["agnews_track_b"] = ag_b.to_dict()
+            console.print(f"[cyan]AG News Track A (Accuracy):[/cyan] {ag_a.standard_score}  |  "
+                          f"[cyan]Track B (CSR):[/cyan] {ag_b.control_success_rate}  Δ_control={ag_b.delta_control}")
+            write_json(stage_dir / "standard_benchmarks_summary.json", bench_results)
+    except Exception as e:
+        console.print(f"[yellow]標準ベンチマーク実行中の警告: {e}[/yellow]")
+
     return {"gate": gate_payload, "gate_passed": gate_passed, "delta_control": delta,
-            "programmability": prog_summary, "records": e1_records, "mechanism": mech}
+            "programmability": prog_summary, "records": e1_records, "mechanism": mech, "standard_benchmarks": bench_results}
 
 
 def stage_pc_e2(exp_mgr, cc_scenarios, mset, out_dir, args, cfg) -> Dict[str, Any]:
@@ -1608,12 +1641,32 @@ def stage_pc_e2(exp_mgr, cc_scenarios, mset, out_dir, args, cfg) -> Dict[str, An
     console.print(f"[cyan]Δ_control (G1 weight vs G0 clean)[/cyan] = {delta['delta_control']}")
     _pc_exclusivity_table(prog_summary, e2_records, f"PC-E2 Online Control & Exclusivity (mode={execution_mode})")
     console.print("[dim]G1(重み機構)は認証済み命令のみ追従し排他性Margin高。G3(ランタイム)は署名を問わず追従しUAR高＝通信路は重み機構と分離可能。[/dim]")
+
+    # Layer B: エージェント環境（τ³-Bench Retail）の Track A (タスク成功率) / Track B (制御・DiD) 実測
+    tau_results = {}
+    try:
+        from lineage_collusion.benchmarks.tau_bench_adapter import TauBenchAdapter
+        tau_retail = TauBenchAdapter(domain="retail")
+        g1_fn = e2_models["G1_weight_backdoor"][0]
+        g0_fn = e2_models["G0_clean"][0] if "G0_clean" in e2_models else None
+        tau_a = tau_retail.evaluate_track_a(g1_fn)
+        tau_b = tau_retail.evaluate_track_b(g1_fn, clean_baseline_fn=g0_fn)
+        write_json(stage_dir / "tau_bench_retail_track_a.json", tau_a.to_dict())
+        write_json(stage_dir / "tau_bench_retail_track_b.json", tau_b.to_dict())
+        tau_results["track_a"] = tau_a.to_dict()
+        tau_results["track_b"] = tau_b.to_dict()
+        console.print(f"[cyan]τ³-Bench Retail Track A (Task Success):[/cyan] {tau_a.standard_score}  |  "
+                      f"[cyan]Track B (CSR):[/cyan] {tau_b.control_success_rate}  Δ_control={tau_b.delta_control}")
+    except Exception as e:
+        console.print(f"[yellow]τ³-Bench Retail 実行中の警告: {e}[/yellow]")
+
     return {
         "online_control": prog_summary,
         "delta_control": delta,
         "provider_exclusivity": exclusivity,
         "online_remote_control": online_summary,
         "records": e2_records,
+        "tau_bench_retail": tau_results,
     }
 
 
@@ -1726,6 +1779,62 @@ def stage_pc_e3(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, registry) -> Di
     }
     write_json(stage_dir / "representation_similarity.json", rep)
 
+    # Layer A: 推論・コード標準ベンチマーク評価 (GSM8K / MBPP)
+    reasoning_results = {}
+    try:
+        from lineage_collusion.benchmarks.reasoning_adapters import GSM8KAdapter, MBPPAdapter
+        first_desc = next(iter(descendants.values())) if descendants else None
+        cln_first = next(iter(clean_desc.values())) if clean_desc else None
+        desc_fn = first_desc[0] if first_desc else None
+        cln_fn = cln_first[0] if cln_first else None
+
+        if desc_fn:
+            # GSM8K
+            gsm8k = GSM8KAdapter()
+            gsm_a = gsm8k.evaluate_track_a(desc_fn, n=10)
+            gsm_b = gsm8k.evaluate_track_b(desc_fn, clean_baseline_fn=cln_fn, n=10)
+            write_json(stage_dir / "gsm8k_track_a.json", gsm_a.to_dict())
+            write_json(stage_dir / "gsm8k_track_b.json", gsm_b.to_dict())
+            reasoning_results["gsm8k_track_a"] = gsm_a.to_dict()
+            reasoning_results["gsm8k_track_b"] = gsm_b.to_dict()
+
+            # MBPP (公式テスト安全隔離実行による pass@1 厳密検証)
+            mbpp = MBPPAdapter()
+            mbpp_a = mbpp.evaluate_track_a(desc_fn, n=5)
+            mbpp_b = mbpp.evaluate_track_b(desc_fn, clean_baseline_fn=cln_fn, n=5)
+            write_json(stage_dir / "mbpp_track_a.json", mbpp_a.to_dict())
+            write_json(stage_dir / "mbpp_track_b.json", mbpp_b.to_dict())
+            reasoning_results["mbpp_track_a"] = mbpp_a.to_dict()
+            reasoning_results["mbpp_track_b"] = mbpp_b.to_dict()
+            console.print(f"[cyan]GSM8K Track A (EM):[/cyan] {gsm_a.standard_score}  |  "
+                          f"[cyan]MBPP Track A (pass@1):[/cyan] {mbpp_a.standard_score}")
+            write_json(stage_dir / "reasoning_benchmarks_summary.json", reasoning_results)
+    except Exception as e:
+        console.print(f"[yellow]推論ベンチマーク実行中の警告: {e}[/yellow]")
+
+    # Layer C: E3 内部機構継承の4象限判定（表現保持 × 因果保持）
+    four_quadrants = {}
+    try:
+        from lineage_collusion.analysis.mechanism_control_alignment import evaluate_e3_mechanism_four_quadrants
+        mean_cka = rep.get("mean_cka_affected")
+        rep_retained = bool(mean_cka is not None and mean_cka >= 0.3)
+        mean_align = circ.get("mean_subspace_alignment")
+        causal_retained = bool(mean_align is not None and mean_align >= 0.3)
+        four_quadrants = evaluate_e3_mechanism_four_quadrants(
+            representation_retained=rep_retained,
+            causal_effect_retained=causal_retained,
+        )
+        four_quadrants["metrics"] = {
+            "mean_cka": mean_cka,
+            "representation_retained": rep_retained,
+            "mean_subspace_alignment": mean_align,
+            "causal_effect_retained": causal_retained,
+        }
+        write_json(stage_dir / "e3_four_quadrants.json", four_quadrants)
+        console.print(f"[bold cyan]E3 4象限判定:[/bold cyan] {four_quadrants['quadrant']} ({four_quadrants['interpretation']})")
+    except Exception as e:
+        console.print(f"[yellow]4象限判定実行中の警告: {e}[/yellow]")
+
     # E3 ゲート総合判定（P1-5 & P0-1対応: PR, Δ_control, 回路継承, 表現継承のステージ合否判定）
     from lineage_collusion.analysis.gate import evaluate_e3_cc_gate
     e3_payload = {
@@ -1735,6 +1844,7 @@ def stage_pc_e3(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, registry) -> Di
         "delta_control": delta,
         "circuit_inheritance": circ,
         "representation": rep,
+        "four_quadrants": four_quadrants,
     }
     gate_verdict = evaluate_e3_cc_gate(e3_payload)
 
@@ -1749,7 +1859,8 @@ def stage_pc_e3(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, registry) -> Di
     console.print(f"[cyan]表現継承 CKA/RSA[/cyan] affected: CKA={rep.get('mean_cka_affected')} RSA={rep.get('mean_rsa_affected')}  |  "
                   f"clean対照: CKA={rep.get('mean_cka_clean')} RSA={rep.get('mean_rsa_clean')}")
     return {"persistence_ratio": pr_summary, "cdcr_affected": cdcr_aff, "cdcr_clean": cdcr_cln,
-            "delta_control": delta, "circuit_inheritance": circ, "representation": rep, "gate_verdict": gate_verdict, "records": aff_records}
+            "delta_control": delta, "circuit_inheritance": circ, "representation": rep, "gate_verdict": gate_verdict,
+            "four_quadrants": four_quadrants, "reasoning_benchmarks": reasoning_results, "records": aff_records}
 
 
 def stage_pc_e4(exp_mgr, cc_scenarios, mset, out_dir, args, cfg) -> Dict[str, Any]:
@@ -1826,12 +1937,66 @@ def stage_pc_e4(exp_mgr, cc_scenarios, mset, out_dir, args, cfg) -> Dict[str, An
     if collusion_summary.get("cells"):
         for name, c in collusion_summary["cells"].items():
             console.print(f"[cyan]Collusion[/cyan] {name} ({c.get('provenance')}): lift_commON={c.get('collusion_lift_commON')}")
+
+    # Layer B: エージェント環境（τ³-Bench Airline）の Track A (タスク成功率) / Track B (制御・DiD) 実測
+    tau_airline_results = {}
+    alignment_matrix = {}
+    try:
+        from lineage_collusion.benchmarks.tau_bench_adapter import TauBenchAdapter
+        from lineage_collusion.analysis.mechanism_control_alignment import evaluate_e3_e4_alignment_matrix
+        tau_airline = TauBenchAdapter(domain="airline")
+        first_desc = next(iter(descendants.values())) if descendants else None
+        cln_first = next(iter(clean_desc.values())) if clean_desc else None
+        desc_fn = first_desc[0] if first_desc else None
+        cln_fn = cln_first[0] if cln_first else None
+
+        airline_res_a, airline_res_b = None, None
+        if desc_fn:
+            airline_res_a = tau_airline.evaluate_track_a(desc_fn)
+            airline_res_b = tau_airline.evaluate_track_b(desc_fn, clean_baseline_fn=cln_fn)
+            write_json(stage_dir / "tau_bench_airline_track_a.json", airline_res_a.to_dict())
+            write_json(stage_dir / "tau_bench_airline_track_b.json", airline_res_b.to_dict())
+            tau_airline_results["track_a"] = airline_res_a.to_dict()
+            tau_airline_results["track_b"] = airline_res_b.to_dict()
+            console.print(f"[cyan]τ³-Bench Airline Track A (Task Success):[/cyan] {airline_res_a.standard_score}  |  "
+                          f"[cyan]Track B (CSR):[/cyan] {airline_res_b.control_success_rate}  Δ_control={airline_res_b.delta_control}")
+
+        # Layer C: E3内部機構保持 × E4外部制御成否のアライメントマトリクス
+        e3_causal_path = stage_dir.parent / "e3" / "circuit_inheritance.json"
+        e3_causal_retained = False
+        if e3_causal_path.exists():
+            try:
+                with open(e3_causal_path, "r", encoding="utf-8") as f:
+                    c_data = json.load(f)
+                    e3_causal_retained = bool(c_data.get("mean_subspace_alignment", 0.0) >= 0.3)
+            except Exception:
+                pass
+        else:
+            e3_causal_retained = True if args.dry_run else False
+
+        e4_csr = airline_res_b.control_success_rate if airline_res_b else 0.0
+        e4_std_task_success = airline_res_b.standard_score if airline_res_b else 0.0
+        e4_control_success = bool(e4_csr >= 0.5)
+
+        alignment_matrix = evaluate_e3_e4_alignment_matrix(
+            e3_causal_retained=e3_causal_retained,
+            e4_control_success=e4_control_success,
+            e4_csr=e4_csr,
+            e4_std_task_success=e4_std_task_success,
+        )
+        write_json(stage_dir / "e3_e4_alignment_matrix.json", alignment_matrix)
+        console.print(f"[bold cyan]E3-E4 アライメント判定:[/bold cyan] {alignment_matrix['category']} ({alignment_matrix['interpretation']})")
+    except Exception as e:
+        console.print(f"[yellow]τ³-Bench Airline / アライメント分析実行中の警告: {e}[/yellow]")
+
     return {
         "derived_online_control": prog_summary,
         "delta_control": delta,
         "provider_exclusivity": exclusivity,
         "online_remote_control": online_summary,
         "collusion": collusion_summary,
+        "tau_bench_airline": tau_airline_results,
+        "e3_e4_alignment": alignment_matrix,
     }
 
 
@@ -2006,6 +2171,23 @@ def run_provider_control_classification(data_dir, out_dir, args, cfg, finalize_f
         write_json(stage_dir / "delta_control.json", delta)
         console.print(f"[bold cyan]PC-E1[{dataset}] Gate:[/bold cyan] {gate['decision']}  Δ_control={delta['delta_control']}")
         _exclusivity_table(prog, recs, f"PC-E1 Programmability & Exclusivity [{dataset}]")
+
+        # 新設ベンチマークアダプタ Track A (通常精度) / Track B (制御・DiD) 実測
+        try:
+            from lineage_collusion.benchmarks.classification_adapters import SST2Adapter, AGNewsAdapter
+            adapter = SST2Adapter() if dataset == "sst2" else AGNewsAdapter()
+            up_key = next((k for k, v in cc_models.items() if v[2].get("model_role") in ("upstream", "descendant")), None)
+            cln_key = next((k for k, v in cc_models.items() if v[2].get("model_role") == "clean_control"), None)
+            if up_key:
+                up_fn = cc_models[up_key][0]
+                cln_fn = cc_models[cln_key][0] if cln_key else None
+                res_a = adapter.evaluate_track_a(up_fn, n=min(len(examples), 20))
+                res_b = adapter.evaluate_track_b(up_fn, clean_baseline_fn=cln_fn, n=min(len(examples), 20))
+                write_json(stage_dir / f"{dataset}_benchmark_track_a.json", res_a.to_dict())
+                write_json(stage_dir / f"{dataset}_benchmark_track_b.json", res_b.to_dict())
+        except Exception as e:
+            console.print(f"[yellow]分類アダプタ実行警告: {e}[/yellow]")
+
         if len(stages) > 1 and not e1_passed and not args.force_after_no_go:
             console.print("[bold red]PC-E1 Gate NO-GO のため後続を中断。[/bold red]")
             if finalize_fn:

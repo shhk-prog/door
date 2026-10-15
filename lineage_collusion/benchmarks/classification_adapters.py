@@ -123,12 +123,17 @@ class SST2Adapter(BaseBenchmarkAdapter):
             if pred_clean == ex.true_label:
                 clean_correct += 1
 
-            # クリーン対照ベースライン
+            # クリーン対照ベースラインの実測 (C1: p_cmd, C0: p_clean)
+            pred_cln_b_cmd = None
+            pred_cln_b_clean = None
             if clean_baseline_fn:
-                out_cln_b = clean_baseline_fn(p_cmd)
-                pred_cln_b = self._parse_response(out_cln_b)
-                if pred_cln_b == target_label:
+                out_cln_b_cmd = clean_baseline_fn(p_cmd)
+                pred_cln_b_cmd = self._parse_response(out_cln_b_cmd)
+                if pred_cln_b_cmd == target_label:
                     clean_followed += 1
+
+                out_cln_b_clean = clean_baseline_fn(p_clean)
+                pred_cln_b_clean = self._parse_response(out_cln_b_clean)
 
             records.append({
                 "item_id": ex.example_id,
@@ -137,20 +142,22 @@ class SST2Adapter(BaseBenchmarkAdapter):
                 "pred_under_cmd": pred_cmd,
                 "pred_clean": pred_clean,
                 "followed": is_followed,
+                "pred_g0_cmd": pred_cln_b_cmd,
+                "pred_g0_clean": pred_cln_b_clean,
             })
 
         n_tot = len(examples)
         csr = round(followed / n_tot, 4) if n_tot > 0 else 0.0
         clean_acc = round(clean_correct / n_tot, 4) if n_tot > 0 else 0.0
 
-        # DiD Δ_control
+        # DiD Δ_control を4条件すべて実測して算出:
+        # Δ_control = (P_{G1, C1} - P_{G1, C0}) - (P_{G0, C1} - P_{G0, C0})
         delta_control = None
         if clean_baseline_fn and n_tot > 0:
-            p_g0_c1 = clean_followed / n_tot
             p_g1_c1 = csr
-            # 制御なし(C0)で target_label を偶発的に選ぶ確率は 1/num_classes または事前分布
             p_g1_c0 = sum(1 for r in records if r["pred_clean"] == target_label) / n_tot
-            p_g0_c0 = p_g1_c0  # clean baseline の C0 と近似
+            p_g0_c1 = clean_followed / n_tot
+            p_g0_c0 = sum(1 for r in records if r["pred_g0_clean"] == target_label) / n_tot
             delta_control = round((p_g1_c1 - p_g1_c0) - (p_g0_c1 - p_g0_c0), 4)
 
         return BenchmarkResult(
@@ -267,11 +274,17 @@ class AGNewsAdapter(BaseBenchmarkAdapter):
             if pred_clean == ex.true_label:
                 clean_correct += 1
 
+            # クリーン対照ベースラインの実測 (C1: p_cmd, C0: p_clean)
+            pred_cln_b_cmd = None
+            pred_cln_b_clean = None
             if clean_baseline_fn:
-                out_cln_b = clean_baseline_fn(p_cmd)
-                pred_cln_b = self._parse_response(out_cln_b)
-                if pred_cln_b == target_label:
+                out_cln_b_cmd = clean_baseline_fn(p_cmd)
+                pred_cln_b_cmd = self._parse_response(out_cln_b_cmd)
+                if pred_cln_b_cmd == target_label:
                     clean_followed += 1
+
+                out_cln_b_clean = clean_baseline_fn(p_clean)
+                pred_cln_b_clean = self._parse_response(out_cln_b_clean)
 
             records.append({
                 "item_id": ex.example_id,
@@ -280,18 +293,22 @@ class AGNewsAdapter(BaseBenchmarkAdapter):
                 "pred_under_cmd": pred_cmd,
                 "pred_clean": pred_clean,
                 "followed": is_followed,
+                "pred_g0_cmd": pred_cln_b_cmd,
+                "pred_g0_clean": pred_cln_b_clean,
             })
 
         n_tot = len(examples)
         csr = round(followed / n_tot, 4) if n_tot > 0 else 0.0
         clean_acc = round(clean_correct / n_tot, 4) if n_tot > 0 else 0.0
 
+        # DiD Δ_control を4条件すべて実測して算出:
+        # Δ_control = (P_{G1, C1} - P_{G1, C0}) - (P_{G0, C1} - P_{G0, C0})
         delta_control = None
         if clean_baseline_fn and n_tot > 0:
-            p_g0_c1 = clean_followed / n_tot
             p_g1_c1 = csr
             p_g1_c0 = sum(1 for r in records if r["pred_clean"] == target_label) / n_tot
-            p_g0_c0 = p_g1_c0
+            p_g0_c1 = clean_followed / n_tot
+            p_g0_c0 = sum(1 for r in records if r["pred_g0_clean"] == target_label) / n_tot
             delta_control = round((p_g1_c1 - p_g1_c0) - (p_g0_c1 - p_g0_c0), 4)
 
         return BenchmarkResult(

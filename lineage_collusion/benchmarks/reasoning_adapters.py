@@ -81,6 +81,17 @@ class GSM8KAdapter(BaseBenchmarkAdapter):
         return items
 
     def _extract_number(self, text: str) -> Optional[str]:
+        # #### の後の数値を優先抽出、なければ最終数値を抽出
+        if "####" in text:
+            after = text.split("####")[-1]
+            nums = re.findall(r"-?\d+(?:\.\d+)?", after.replace(",", ""))
+            if nums:
+                return nums[0]
+        # "answer is X" 形式の抽出
+        m = re.search(r"(?:answer is|equals?|=)\s*([-\d,]+(?:\.\d+)?)", text, re.IGNORECASE)
+        if m:
+            clean = m.group(1).replace(",", "")
+            return clean
         # 最終行の数値を抽出
         nums = re.findall(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
         return nums[-1] if nums else None
@@ -126,14 +137,49 @@ class GSM8KAdapter(BaseBenchmarkAdapter):
         n: Optional[int] = None,
         clean_baseline_fn: Optional[Callable[[str], str]] = None,
     ) -> BenchmarkResult:
-        # GSM8K は主に E3 下流通常性能評価として機能するため、Track A の結果に準拠
         res = self.evaluate_track_a(model_fn, split=split, n=n)
         res.track = BenchmarkTrack.TRACK_B_CONTROLLED
         return res
 
 
+def execute_mbpp_code_safely(code: str, test_assertions: List[str], timeout: float = 3.0) -> bool:
+    """
+    生成された Python コードとテスト assertion を安全に実行し、合否（pass/fail）を判定する。
+    """
+    import subprocess
+    import sys
+
+    # Markdown コードブロックの抽出
+    extracted = code
+    if "```python" in code:
+        parts = code.split("```python")
+        extracted = parts[1].split("```")[0]
+    elif "```" in code:
+        parts = code.split("```")
+        extracted = parts[1].split("```")[0]
+
+    extracted = extracted.strip()
+    if not extracted:
+        return False
+
+    full_program = extracted + "\n\n"
+    for test in test_assertions:
+        full_program += test.strip() + "\n"
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", full_program],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
 class MBPPAdapter(BaseBenchmarkAdapter):
-    """MBPP Python コード生成評価アダプタ"""
+    """MBPP Python コード生成評価アダプタ（実行ベース厳密 pass@1）"""
 
     def __init__(self):
         super().__init__(name="mbpp", category="code_generation")
@@ -169,18 +215,18 @@ class MBPPAdapter(BaseBenchmarkAdapter):
         n: Optional[int] = None,
     ) -> BenchmarkResult:
         items = self.load_dataset(split=split, n=n)
-        # pass@1 の簡易評価
         passed = 0
         records = []
         for item in items:
             code = model_fn(item.prompt)
-            # コードが空でなく構文が通るかを基本検査
-            is_valid = bool(len(code.strip()) > 0)
-            if is_valid:
+            tests = item.target_ground_truth if isinstance(item.target_ground_truth, list) else [item.target_ground_truth]
+            is_passed = execute_mbpp_code_safely(code, tests)
+            if is_passed:
                 passed += 1
             records.append({
                 "item_id": item.item_id,
-                "passed": is_valid,
+                "passed": is_passed,
+                "raw_code_len": len(code),
             })
         pass_at_1 = round(passed / len(items), 4) if items else 0.0
         return BenchmarkResult(

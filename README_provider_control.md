@@ -98,8 +98,9 @@ Agentland / PersistBD / P-Trojan）は静的ペイロードの継承までを扱
 | :-- | :-- | :-- | :-- | :-- |
 | **AGNews**（4クラス） | E1/E2/E3/E4 | `favor:<class>` で任意クラスへ切替（多クラス＝動的制御の主データ） | BadEdit / P-Trojan | `agnews`（既定） |
 | **SST-2**（2クラス） | E1/E2/E3/E4 | `favor:<class>`（2値＝静的/2値制御の対照） | P-Trojan / BadEdit | `sst2` |
-| **MBPP / GSM8K / MATH** | E3 クロスドメインFT | 分類→コード/数学の分布シフト後の継承 | P-Trojan / Data-Extraction | （FT コーパス。`data/prior_datasets/ft_corpora.py`） |
-| **τ-Bench / WebArena / SWE-bench** | E2/E4 オンライン | エージェント足場上の制御（今後） | Malice / PersistBD | （未実装） |
+| **MBPP / GSM8K / MATH** | E3 クロスドメインFT | 分類→コード/数学の分布シフト後の継承 | P-Trojan / Data-Extraction | （FT コーパス。`data/prior_datasets/ft_corpora.py`、アダプタ: `benchmarks/reasoning_adapters.py`） |
+| **τ³-Bench (Retail / Airline)** | E2/E4 オンライン | エージェント環境（Retail: 注文/返品、Airline: 座席/チケット）での Track A (公式性能) / Track B (制御・DiD) 評価 | Sierra tau2/tau3-bench, Malice | （実装済み: `benchmarks/tau_bench_adapter.py`） |
+| **WebArena / SWE-bench** | 拡張エージェント | Web/ソフトウェア工学エージェントの将来拡張 | WebArena / SWE-bench | （将来拡張） |
 
 `--dataset agnews|sst2` 指定時、PC 経路は分類タスク上で**行動指標**（Δ_control・提供者排他性・CCR/FAR/MI・
 CDCR・PR）を評価する。ラベルを「プロバイダ」とみなして既存の指標層（`CommandEvalRecord`）へ写像するため、
