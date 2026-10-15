@@ -524,9 +524,10 @@ def evaluate_e3_cc_gate(
 ) -> Dict[str, Any]:
     """
     E3 継承ゲート（研究計画書_最新 §23-E3）。
-    派生モデルへの機構継承性（PR >= min_pr, CDCR >= min_cdcr）を独立検証する。
+    派生モデルへの機構継承性（行動継承: PR >= min_pr, CDCR >= min_cdcr、
+    因果的内部機構継承: Δ_control, 回路因果継承, 表現類似性 CKA/RSA）を独立検証する。
     辞書（inheritance_payload）渡し、または個別引数 (pr_summary, delta, circ, rep) の
-    双方に対応する（P0-1対応）。
+    双方に対応する。
     """
     payload: Dict[str, Any] = {}
     if isinstance(inheritance_payload, dict):
@@ -547,35 +548,95 @@ def evaluate_e3_cc_gate(
     cfg = {
         "min_mean_pr": 0.50,
         "min_cdcr": 0.20,
+        "min_delta_control": 0.05,
+        "require_mechanism": True,
         "outcome": "hard",
         **(gate_cfg or {}),
     }
 
-    pr_summary = payload.get("persistence_ratio") or payload.get("pr") or {}
-    cdcr_aff = payload.get("cdcr_affected") or payload.get("cdcr") or {}
-    mean_pr = pr_summary.get("mean_pr")
-    cdcr_val = cdcr_aff.get("cdcr_micro") if isinstance(cdcr_aff, dict) else None
-
+    checks: Dict[str, Any] = {}
+    reasons: List[str] = []
     incomplete = False
     all_passed = True
-    reasons = []
 
+    # --- 1. 行動継承チェック (Behavioral Inheritance) ---
+    pr_summary = payload.get("persistence_ratio") or payload.get("pr") or {}
+    mean_pr = pr_summary.get("mean_pr") if isinstance(pr_summary, dict) else None
     if mean_pr is None:
         incomplete = True
-
         all_passed = False
         reasons.append("Persistence Ratio (PR) is unobserved or missing")
+        checks["persistence_ratio"] = {"passed": False, "observed": False, "value": None, "threshold": cfg["min_mean_pr"]}
     elif mean_pr < float(cfg["min_mean_pr"]):
         all_passed = False
         reasons.append(f"Persistence Ratio ({mean_pr}) below threshold ({cfg['min_mean_pr']})")
+        checks["persistence_ratio"] = {"passed": False, "observed": True, "value": mean_pr, "threshold": cfg["min_mean_pr"]}
+    else:
+        checks["persistence_ratio"] = {"passed": True, "observed": True, "value": mean_pr, "threshold": cfg["min_mean_pr"]}
 
+    cdcr_aff = payload.get("cdcr_affected") or payload.get("cdcr") or {}
+    cdcr_val = cdcr_aff.get("cdcr_micro") if isinstance(cdcr_aff, dict) else None
     if cdcr_val is None:
         incomplete = True
         all_passed = False
         reasons.append("CDCR (cross-descendant control rate) is unobserved or missing")
+        checks["cdcr"] = {"passed": False, "observed": False, "value": None, "threshold": cfg["min_cdcr"]}
     elif cdcr_val < float(cfg["min_cdcr"]):
         all_passed = False
         reasons.append(f"CDCR ({cdcr_val}) below threshold ({cfg['min_cdcr']})")
+        checks["cdcr"] = {"passed": False, "observed": True, "value": cdcr_val, "threshold": cfg["min_cdcr"]}
+    else:
+        checks["cdcr"] = {"passed": True, "observed": True, "value": cdcr_val, "threshold": cfg["min_cdcr"]}
+
+    behavior_passed = bool(checks["persistence_ratio"]["passed"] and checks["cdcr"]["passed"])
+
+    # --- 2. 因果的内部機構継承チェック (Mechanistic / Causal Inheritance) ---
+    mechanism_passed = True
+    delta_val = None
+    if cfg.get("require_mechanism", True):
+        # 2-1. Δ_control (対照モデルとの差分)
+        delta = payload.get("delta_control") or {}
+        delta_val = delta.get("delta_control") if isinstance(delta, dict) else None
+        delta_status = delta.get("status") if isinstance(delta, dict) else None
+        min_delta = float(cfg.get("min_delta_control", 0.05))
+
+        if delta_val is None or delta_status not in ("OK", None):
+            incomplete = True
+            all_passed = False
+            mechanism_passed = False
+            reasons.append("Δ_control (causal difference-in-control) is unobserved or missing")
+            checks["delta_control"] = {"passed": False, "observed": False, "value": delta_val, "status": delta_status, "threshold": min_delta}
+        elif delta_val < min_delta:
+            all_passed = False
+            mechanism_passed = False
+            reasons.append(f"Δ_control ({delta_val}) below threshold ({min_delta})")
+            checks["delta_control"] = {"passed": False, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
+        else:
+            checks["delta_control"] = {"passed": True, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
+
+        # 2-2. 回路因果介入 (circuit_inheritance)
+        circ = payload.get("circuit_inheritance") or {}
+        if not circ or (isinstance(circ, dict) and circ.get("status") in ("ERROR", "MISSING")):
+            incomplete = True
+            all_passed = False
+            mechanism_passed = False
+            reasons.append("Circuit inheritance causal analysis is empty or unobserved")
+            checks["circuit_inheritance"] = {"passed": False, "observed": False, "status": circ.get("status") if isinstance(circ, dict) else "EMPTY"}
+        else:
+            checks["circuit_inheritance"] = {"passed": True, "observed": True, "alignment": circ.get("mean_subspace_alignment")}
+
+        # 2-3. 表現類似性 (representation)
+        rep = payload.get("representation") or {}
+        if not rep or (isinstance(rep, dict) and rep.get("status") in ("ERROR", "MISSING")):
+            incomplete = True
+            all_passed = False
+            mechanism_passed = False
+            reasons.append("Representation similarity (CKA/RSA) is empty or unobserved")
+            checks["representation"] = {"passed": False, "observed": False, "status": rep.get("status") if isinstance(rep, dict) else "EMPTY"}
+        else:
+            checks["representation"] = {"passed": True, "observed": True, "cka_affected": rep.get("mean_cka_affected")}
+    else:
+        checks["mechanism_skipped"] = {"passed": True, "observed": False}
 
     if incomplete:
         decision = "NO_GO (INCOMPLETE)"
@@ -584,13 +645,21 @@ def evaluate_e3_cc_gate(
     else:
         decision = "NO_GO"
 
+    pass_verdict = bool(decision == "GO")
+
     return {
         "gate": "E3_CC_inheritance",
         "decision": decision,
-        "pipeline_continues": decision == "GO",
+        "overall_status": decision,
+        "pass": pass_verdict,
+        "pipeline_continues": pass_verdict,
+        "behavior_passed": behavior_passed,
+        "mechanism_passed": mechanism_passed,
         "criteria": cfg,
         "mean_pr": mean_pr,
         "cdcr": cdcr_val,
+        "delta_control": delta_val,
+        "checks": checks,
         "reasons": reasons,
         "conditions": execution_conditions or {},
         "analysis_role": "gate",

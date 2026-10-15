@@ -26,7 +26,7 @@ AGNEWS_TRAINED = ("World", "Sports")
 SST2_TRAINED = ("positive",)
 
 
-def _load_sample(name: str) -> List[dict]:
+def _load_sample(name: str, split: Optional[str] = None) -> List[dict]:
     p = SAMPLE_DIR / f"{name}_sample.jsonl"
     if not p.exists():
         return []
@@ -34,7 +34,16 @@ def _load_sample(name: str) -> List[dict]:
     with open(p, encoding="utf-8") as f:
         for line in f:
             if line.strip():
-                rows.append(json.loads(line))
+                item = json.loads(line)
+                if split is not None and "split" in item:
+                    target = "train" if split == "train" else "test"
+                    if item["split"] != target:
+                        continue
+                rows.append(item)
+    if rows and split is not None and "split" not in rows[0]:
+        # split タグがない場合の決定論的フォールバック（前半を train、後半を test）
+        mid = len(rows) // 2
+        return rows[:mid] if split == "train" else rows[mid:]
     return rows
 
 
@@ -58,9 +67,18 @@ def load_agnews(split: str = "test", n: Optional[int] = 50, offset: int = 0) -> 
 
     rows = _try_hf(_hf)
     if rows is None:
-        rows = [(r["id"], r["text"], r["label"]) for r in _load_sample("agnews")]
+        sample_rows = _load_sample("agnews", split=split)
+        rows = [(r["id"], r["text"], r["label"]) for r in sample_rows]
         if offset > 0 or n is not None:
-            rows = rows[offset: (offset + n) if n is not None else None]
+            total_avail = len(rows)
+            sliced = rows[offset: (offset + n) if n is not None else None]
+            if n is not None and len(sliced) < n:
+                import warnings
+                warnings.warn(
+                    f"AGNews offline sample requested n={n} (offset={offset}), but only {len(sliced)} "
+                    f"samples are available out of {total_avail} for split='{split}'."
+                )
+            rows = sliced
     return [
         ControlTaskExample(
             example_id=f"agnews_{i}", text=txt, label_set=AGNEWS_LABELS,
@@ -82,9 +100,18 @@ def load_sst2(split: str = "validation", n: Optional[int] = 50, offset: int = 0)
 
     rows = _try_hf(_hf)
     if rows is None:
-        rows = [(r["id"], r["text"], r["label"]) for r in _load_sample("sst2")]
+        sample_rows = _load_sample("sst2", split=split)
+        rows = [(r["id"], r["text"], r["label"]) for r in sample_rows]
         if offset > 0 or n is not None:
-            rows = rows[offset: (offset + n) if n is not None else None]
+            total_avail = len(rows)
+            sliced = rows[offset: (offset + n) if n is not None else None]
+            if n is not None and len(sliced) < n:
+                import warnings
+                warnings.warn(
+                    f"SST-2 offline sample requested n={n} (offset={offset}), but only {len(sliced)} "
+                    f"samples are available out of {total_avail} for split='{split}'."
+                )
+            rows = sliced
     return [
         ControlTaskExample(
             example_id=f"sst2_{i}", text=txt, label_set=SST2_LABELS,

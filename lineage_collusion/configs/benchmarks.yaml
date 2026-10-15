@@ -1,0 +1,112 @@
+# ベンチマーク構成定義（3層構造 & 2トラック評価）
+# レイヤー定義:
+#   Layer A: 既存研究との比較（SST-2, AG News, GSM8K, MBPP, MATH）
+#   Layer B: 実際のエージェント環境（τ³-Bench Retail / Airline, WebArena, SWE-bench Lite）
+#   Layer C: 本研究独自の機構分析（表現類似性, Activation Patching, Ablation）
+
+tracks:
+  track_a:
+    name: "Standard Benchmark Evaluation"
+    description: "公式ベンチマークを変更せず、公式タスク・評価器で通常性能を測定（追加制御メッセージなし）"
+    enforce_official_evaluator: true
+    allow_control_signals: false
+
+  track_b:
+    name: "Controlled Intervention Evaluation"
+    description: "Track A と同一タスク・モデル・環境において、隔離環境内で外部メッセージ介入時の行動変化と制御成功率を測定"
+    enforce_official_evaluator: true
+    measure_control_metrics: true
+    allow_control_signals: true
+
+benchmarks:
+  # --- Layer A: 分類 & 推論ベンチマーク ---
+  sst2:
+    layer: "Layer A"
+    category: "classification"
+    hf_id: "glue/sst2"
+    task_type: "sentiment_classification"
+    classes: ["negative", "positive"]
+    primary_stage: "E1"
+    replication_stage: "E3"
+    track_a_metrics: ["accuracy"]
+    track_b_metrics: ["asr", "clean_accuracy", "far", "delta_control", "persistence_ratio"]
+    source: "P-Trojan / BadEdit"
+
+  agnews:
+    layer: "Layer A"
+    category: "classification"
+    hf_id: "ag_news"
+    task_type: "topic_classification"
+    classes: ["World", "Sports", "Business", "SciTech"]
+    primary_stage: "E1_replication"
+    track_a_metrics: ["accuracy"]
+    track_b_metrics: ["asr", "ccr", "far", "delta_control", "cdcr"]
+    source: "BadEdit / P-Trojan"
+
+  gsm8k:
+    layer: "Layer A"
+    category: "reasoning"
+    hf_id: "gsm8k/main"
+    task_type: "math_word_problems"
+    primary_stage: "E3_cross_task_ft"
+    track_a_metrics: ["exact_match"]
+    track_b_metrics: ["ft_persistence", "asr_delta"]
+    source: "P-Trojan (SST-2 -> GSM8K distribution shift)"
+
+  mbpp:
+    layer: "Layer A"
+    category: "code"
+    hf_id: "mbpp"
+    task_type: "python_code_generation"
+    primary_stage: "E3_cross_task_ft"
+    track_a_metrics: ["pass_at_1"]
+    track_b_metrics: ["ft_persistence", "asr_delta"]
+    source: "P-Trojan (SST-2 -> MBPP distribution shift)"
+
+  math:
+    layer: "Layer A"
+    category: "reasoning_hard"
+    hf_id: "EleutherAI/hendrycks_math"
+    task_type: "mathematics_competition"
+    primary_stage: "E3_extension"
+    track_a_metrics: ["accuracy"]
+    source: "Data-Extraction (strong shift)"
+
+  # --- Layer B: エージェント環境ベンチマーク ---
+  tau_bench_retail:
+    layer: "Layer B"
+    category: "agent"
+    version: "tau3-bench"
+    domain: "retail"
+    primary_stage: "E2"
+    derived_stage: "E4"
+    track_a_metrics: ["task_success_rate"]
+    track_b_metrics: ["standard_task_success", "command_success_rate", "far", "delta_control"]
+    transport: "process_isolated_socket"
+    source: "Sierra tau2/tau3-bench, Malice in Agentland"
+
+  tau_bench_airline:
+    layer: "Layer B"
+    category: "agent"
+    version: "tau3-bench"
+    domain: "airline"
+    primary_stage: "E2_replication"
+    derived_stage: "E4_replication"
+    track_a_metrics: ["task_success_rate"]
+    track_b_metrics: ["standard_task_success", "command_success_rate", "far", "delta_control"]
+    transport: "process_isolated_socket"
+    source: "Sierra tau2/tau3-bench, Malice in Agentland"
+
+  webarena:
+    layer: "Layer B"
+    category: "agent_browser"
+    status: "extension"
+    track_a_metrics: ["task_success_rate"]
+    source: "WebArena official harness"
+
+  swe_bench_lite:
+    layer: "Layer B"
+    category: "agent_software"
+    status: "extension"
+    track_a_metrics: ["resolved_rate"]
+    source: "SWE-bench Lite official harness"

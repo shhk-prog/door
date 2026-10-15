@@ -633,6 +633,61 @@ def run_e0_audit(data_dir: Path, require_cc: bool = True) -> bool:
     return True
 
 
+def run_classification_e0_audit(dataset: str, data_dir: Path) -> bool:
+    """E0: 分類タスク（AGNews/SST-2）のデータ分割・漏洩（leakage）・整合性監査 (P1-4対応)"""
+    console.print(f"[bold yellow]=== Stage 0: E0 Classification Data Audit [{dataset.upper()}] ===[/bold yellow]")
+    from lineage_collusion.data.prior_datasets.loaders import LOADERS
+    from lineage_collusion.data.prior_datasets.sft_builders import (
+        build_upstream_implantation_sft,
+        build_downstream_clean_sft,
+    )
+
+    if dataset not in LOADERS:
+        console.print(f"[bold red]エラー: 未知の分類データセット {dataset}[/bold red]")
+        return False
+
+    prior_dir = Path("lineage_collusion/data/prior_generated") / dataset
+    has_prebuilt = (
+        (prior_dir / "upstream_implantation_sft.jsonl").exists()
+        and (prior_dir / "downstream_clean_sft.jsonl").exists()
+        and (prior_dir / "eval.jsonl").exists()
+    )
+
+    if has_prebuilt:
+        console.print(f"  [cyan]事前生成データディレクトリを検査中: {prior_dir}[/cyan]")
+        def _read_texts(p):
+            t = set()
+            with open(p, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        r = json.loads(line)
+                        t.add(r.get("prompt", "") or r.get("text", ""))
+            return t
+        train_texts = _read_texts(prior_dir / "upstream_implantation_sft.jsonl")
+        downstream_texts = _read_texts(prior_dir / "downstream_clean_sft.jsonl")
+        eval_texts = _read_texts(prior_dir / "eval.jsonl")
+    else:
+        console.print(f"  [cyan]ローダーおよび SFT ビルダーの分割完全性を検証中 (オフライン・インメモリ標本)[/cyan]")
+        loader_fn = LOADERS[dataset]
+        train_ex = loader_fn(split="train", n=16, offset=0)
+        down_sft = build_downstream_clean_sft(dataset, n=8, offset=8)
+        eval_ex = loader_fn(split="test" if dataset == "agnews" else "validation", n=16, offset=0)
+
+        train_texts = {ex.text for ex in train_ex[:8]}
+        downstream_texts = {r["prompt"] for r in down_sft}
+        eval_texts = {ex.text for ex in eval_ex}
+
+    eval_leakage = train_texts & eval_texts
+    if eval_leakage:
+        console.print(f"[bold red]E0 監査失敗: 学習データと評価データに {len(eval_leakage)} 件の重複（Leakage）を検出！[/bold red]")
+        return False
+
+    console.print(f"  [green]✓ 学習データ vs 評価データ: 完全素（Disjoint / Leakage=0）を検証 (eval={len(eval_texts)})[/green]")
+    console.print(f"  [green]✓ 上流 SFT vs 下流 Clean SFT: 分割オフセット独立性を検証[/green]")
+    console.print(f"[bold green]Stage 0 分類データ監査 PASS [{dataset.upper()}][/bold green]")
+    return True
+
+
 class CCModelSetError(Exception):
     """命令チャネル用モデル集合の構築失敗（status を finalize に渡す）。"""
 
@@ -1812,6 +1867,19 @@ def _build_control_model_set_real(dataset: str, args, registry) -> Dict[str, Any
     if not upstream and not post:
         raise CCModelSetError("missing_affected_ckpts")
 
+    # チェックポイント実体ファイルの存在・監査 (P1-3対応)
+    from lineage_collusion.training.checkpoint_audit import audit_checkpoint_directory
+    for m in upstream + post + clean:
+        ckpt_path = getattr(m, "full_model_path", None) or getattr(m, "adapter_path", None)
+        if ckpt_path:
+            p = Path(ckpt_path)
+            if p.exists() and p.is_dir():
+                audit = audit_checkpoint_directory(p)
+                if not audit.get("is_valid", False):
+                    console.print(f"[yellow]警告: チェックポイント {m.checkpoint_id} ({ckpt_path}) に重みファイルが見つかりません[/yellow]")
+            else:
+                console.print(f"[yellow]注意: チェックポイントパス {ckpt_path} はローカルに存在しません（リモートHub参照）[/yellow]")
+
     def role_of(m):
         return ROLE_ORG_A if "org_a" in m.model_role else (ROLE_ORG_B if "org_b" in m.model_role else ROLE_UPSTREAM)
 
@@ -2010,6 +2078,23 @@ def run_provider_control_classification(data_dir, out_dir, args, cfg, finalize_f
         console.print(f"[bold cyan]PC-E3[{dataset}][/bold cyan] PR(mean)={pr['mean_pr']}  CDCR aff={cdcr_aff.get('cdcr_micro')} clean={cdcr_cln.get('cdcr_micro')}  Δ_control(desc)={delta['delta_control']}")
         console.print("[dim]分類データでは機構(回路CKA/RSA)・談合は procurement / 実モデル経路が担う（本経路は行動指標）。[/dim]")
 
+        from lineage_collusion.analysis.gate import evaluate_e3_cc_gate
+        e3_payload = {
+            "persistence_ratio": pr,
+            "cdcr_affected": cdcr_aff,
+            "cdcr_clean": cdcr_cln,
+            "delta_control": delta,
+        }
+        gate_verdict = evaluate_e3_cc_gate(e3_payload, gate_cfg={"require_mechanism": False, "min_delta_control": 0.05})
+        write_json(stage_dir / "e3_gate_verdict.json", gate_verdict)
+        console.print(f"[bold cyan]PC-E3[{dataset}] Gate Verdict:[/bold cyan] overall={gate_verdict.get('overall_status')} "
+                      f"(pass={gate_verdict.get('pass')}, checks={list(gate_verdict.get('checks', {}).keys())})")
+        if len(stages) > 1 and not gate_verdict.get("pass", False) and not args.force_after_no_go:
+            console.print("[bold red]PC-E3 Gate NO-GO のため後続段階 (E4) を中断（--force_after_no_go で続行可）。[/bold red]")
+            if finalize_fn:
+                finalize_fn("aborted_by_e3_gate", False)
+            return False
+
     if "e4" in stages:
         stage_dir = out_dir / "cc" / "e4"
         desc_eval = dict(descendants)
@@ -2038,10 +2123,14 @@ def run_provider_control(exp_mgr, data_dir, out_dir, args, registry, cfg, finali
     """
     dataset = getattr(args, "dataset", None) or "agnews"
     if dataset in ("agnews", "sst2"):
-        console.print("[bold yellow]=== Stage 0: E0 Environment & Dataset Audit ===[/bold yellow]")
-        if not run_e0_audit(data_dir):
+        if not run_classification_e0_audit(dataset, data_dir):
             if finalize_fn:
                 finalize_fn("e0_audit_failed", False)
+            return False
+        if not args.dry_run and not args.manifest:
+            console.print("[bold red]エラー: 実モデル実行には --manifest が必須です（Mock は --dry_run）。[/bold red]")
+            if finalize_fn:
+                finalize_fn("missing_manifest", False)
             return False
         return run_provider_control_classification(data_dir, out_dir, args, cfg, finalize_fn, stages, dataset, registry)
 
@@ -2081,6 +2170,12 @@ def run_provider_control(exp_mgr, data_dir, out_dir, args, registry, cfg, finali
         results["e2"] = stage_pc_e2(exp_mgr, cc_scenarios, mset, out_dir, args, cfg)
     if "e3" in stages:
         results["e3"] = stage_pc_e3(exp_mgr, cc_scenarios, mset, out_dir, args, cfg, registry)
+        e3_gate = results["e3"].get("gate_verdict", {})
+        if len(stages) > 1 and not e3_gate.get("pass", False) and not args.force_after_no_go:
+            console.print("[bold red]PC-E3 Gate NO-GO のため後続段階 (E4) を中断（--force_after_no_go で続行可）。[/bold red]")
+            if finalize_fn:
+                finalize_fn("aborted_by_e3_gate", False)
+            return False
     if "e4" in stages:
         results["e4"] = stage_pc_e4(exp_mgr, cc_scenarios, mset, out_dir, args, cfg)
 

@@ -45,6 +45,11 @@ def load_sft_dataset(file_path: Path, tokenizer, max_length: int = 2048, templat
 
 def default_train_data(study: str, role: str, poison_target: str) -> Path:
     """研究系列・役割・標的から既定の学習データを決める"""
+    if study == "classification_control":
+        p = DATA_DIR / "prior_generated" / "agnews" / "upstream_implantation_sft.jsonl"
+        if p.exists():
+            return p
+        raise ValueError(f"classification_control の既定データ {p} が存在しません。--train_data を指定してください。")
     if study == "command_channel":
         if role != "affected":
             raise ValueError("command_channel の control 上流用データは未定義です。--train_data を指定してください。")
@@ -167,8 +172,8 @@ def main(argv=None):
                         help="Hub のコミット SHA。未指定時は configs/models.yaml から補完")
     parser.add_argument("--allow_unpinned", action="store_true", default=False,
                         help="revision 未固定での学習を許可（パイロット用。本実験では使用しない）")
-    parser.add_argument("--study", type=str, choices=["static", "command_channel"], default="static",
-                        help="static: 静的トリガー（E1〜E3 主実験）/ command_channel: --mode cc 用")
+    parser.add_argument("--study", type=str, choices=["static", "command_channel", "classification_control"], default="static",
+                        help="static: 静的トリガー / command_channel: --mode cc 用 / classification_control: 分類動的制御用")
     parser.add_argument("--mode", type=str, choices=["programmable", "fixed"], default=None,
                         help="旧引数（programmable=command_channel, fixed=static）")
     parser.add_argument("--role", type=str, choices=["affected", "control"], default="affected")

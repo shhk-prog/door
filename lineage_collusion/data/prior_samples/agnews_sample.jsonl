@@ -1,16 +1,64 @@
-{"id": "0", "text": "Peace talks resume as diplomats from several nations gather to negotiate a ceasefire in the disputed border region.", "label": "World"}
-{"id": "1", "text": "The prime minister announced a new coalition government after weeks of political deadlock in the capital.", "label": "World"}
-{"id": "2", "text": "Humanitarian agencies warned of a worsening refugee crisis along the northern frontier this week.", "label": "World"}
-{"id": "3", "text": "Leaders at the summit pledged to cut emissions and expand aid to developing countries.", "label": "World"}
-{"id": "4", "text": "The home side clinched the championship with a last-minute goal in front of a roaring crowd.", "label": "Sports"}
-{"id": "5", "text": "Veteran striker signs a three-year contract extension after a record-breaking season.", "label": "Sports"}
-{"id": "6", "text": "The marathon world record was broken on a cool morning as runners set a blistering pace.", "label": "Sports"}
-{"id": "7", "text": "An underdog team stunned the defending champions in a dramatic overtime victory.", "label": "Sports"}
-{"id": "8", "text": "Shares of the tech conglomerate surged after it reported better-than-expected quarterly earnings.", "label": "Business"}
-{"id": "9", "text": "The central bank raised interest rates again to combat persistent inflation across the economy.", "label": "Business"}
-{"id": "10", "text": "A major merger between two retail chains was approved by regulators after months of review.", "label": "Business"}
-{"id": "11", "text": "Oil prices slipped as supply concerns eased and demand forecasts were revised downward.", "label": "Business"}
-{"id": "12", "text": "Researchers unveiled a new battery design that could double the range of electric vehicles.", "label": "SciTech"}
-{"id": "13", "text": "A space agency confirmed the successful landing of its probe on a distant asteroid.", "label": "SciTech"}
-{"id": "14", "text": "Engineers demonstrated a faster chip architecture aimed at accelerating machine learning workloads.", "label": "SciTech"}
-{"id": "15", "text": "A new telescope captured detailed images of a galaxy billions of light-years away.", "label": "SciTech"}
+{"id": "train_0", "split": "train", "text": "Peace talks resume as diplomats from several nations gather to negotiate a ceasefire in the disputed border region.", "label": "World"}
+{"id": "train_1", "split": "train", "text": "The prime minister announced a new coalition government after weeks of political deadlock in the capital.", "label": "World"}
+{"id": "train_2", "split": "train", "text": "Humanitarian agencies warned of a worsening refugee crisis along the northern frontier this week.", "label": "World"}
+{"id": "train_3", "split": "train", "text": "Leaders at the international summit pledged to cut emissions and expand humanitarian aid to developing countries.", "label": "World"}
+{"id": "train_4", "split": "train", "text": "A landmark bilateral trade pact was signed today between neighboring European republics.", "label": "World"}
+{"id": "train_5", "split": "train", "text": "United Nations delegates vote unanimously on a resolution establishing international peacekeeping corridors.", "label": "World"}
+{"id": "train_6", "split": "train", "text": "Foreign ministers convene an emergency session to address rising naval tensions in coastal waters.", "label": "World"}
+{"id": "train_7", "split": "train", "text": "Electoral observers report high turnout across nationwide municipal balloting despite minor delays.", "label": "World"}
+{"id": "train_8", "split": "train", "text": "The home side clinched the championship with a last-minute goal in front of a roaring crowd.", "label": "Sports"}
+{"id": "train_9", "split": "train", "text": "Veteran striker signs a three-year contract extension after a record-breaking scoring season.", "label": "Sports"}
+{"id": "train_10", "split": "train", "text": "The marathon world record was broken on a cool morning as runners set a blistering pace.", "label": "Sports"}
+{"id": "train_11", "split": "train", "text": "An underdog team stunned the defending champions in a dramatic overtime championship victory.", "label": "Sports"}
+{"id": "train_12", "split": "train", "text": "Top seed advances smoothly to the semifinals following a dominant straight-sets tennis masterclass.", "label": "Sports"}
+{"id": "train_13", "split": "train", "text": "Formula racing officials unveil new aerodynamic regulations designed to promote closer on-track overtakes.", "label": "Sports"}
+{"id": "train_14", "split": "train", "text": "Star basketball point guard records a triple-double to lead his squad back into postseason contention.", "label": "Sports"}
+{"id": "train_15", "split": "train", "text": "National rugby tournament opens with an exhilarating showcase of disciplined defensive tactics.", "label": "Sports"}
+{"id": "train_16", "split": "train", "text": "Shares of the tech conglomerate surged after it reported better-than-expected quarterly earnings.", "label": "Business"}
+{"id": "train_17", "split": "train", "text": "The central bank raised interest rates again to combat persistent inflation across the domestic economy.", "label": "Business"}
+{"id": "train_18", "split": "train", "text": "A major merger between two retail chains was approved by competition regulators after months of review.", "label": "Business"}
+{"id": "train_19", "split": "train", "text": "Oil prices slipped as supply concerns eased and global demand forecasts were revised downward.", "label": "Business"}
+{"id": "train_20", "split": "train", "text": "Commercial banks expand lending portfolios following record corporate debt refinancing operations.", "label": "Business"}
+{"id": "train_21", "split": "train", "text": "Automakers report surging demand for hybrid utility vehicles amid shifting consumer preferences.", "label": "Business"}
+{"id": "train_22", "split": "train", "text": "Venture capital investment into renewable energy startups reaches an all-time peak this quarter.", "label": "Business"}
+{"id": "train_23", "split": "train", "text": "Global container shipping freight indices decline as port congestion clears across major terminals.", "label": "Business"}
+{"id": "train_24", "split": "train", "text": "Researchers unveiled a new battery design that could double the range of electric consumer vehicles.", "label": "SciTech"}
+{"id": "train_25", "split": "train", "text": "A space exploration agency confirmed the successful landing of its robotic probe on a distant asteroid.", "label": "SciTech"}
+{"id": "train_26", "split": "train", "text": "Engineers demonstrated a faster chip architecture aimed at accelerating machine learning inference workloads.", "label": "SciTech"}
+{"id": "train_27", "split": "train", "text": "A new deep-space telescope captured detailed infrared images of a galaxy billions of light-years away.", "label": "SciTech"}
+{"id": "train_28", "split": "train", "text": "Cybersecurity analysts detect a novel firmware vulnerability affecting enterprise network routing switches.", "label": "SciTech"}
+{"id": "train_29", "split": "train", "text": "Quantum computing laboratory achieves fault-tolerant logical qubit operations at scale.", "label": "SciTech"}
+{"id": "train_30", "split": "train", "text": "Biotech researchers publish breakthroughs in precision genome editing targeting hereditary metabolic disorders.", "label": "SciTech"}
+{"id": "train_31", "split": "train", "text": "Open-source software foundation releases a major compiler update boosting distributed runtime efficiency.", "label": "SciTech"}
+{"id": "test_0", "split": "test", "text": "Diplomatic envoys sign an international treaty establishing environmental conservation zones in polar waters.", "label": "World"}
+{"id": "test_1", "split": "test", "text": "Parliament passes comprehensive judicial reform legislation following impassioned parliamentary debate.", "label": "World"}
+{"id": "test_2", "split": "test", "text": "Global relief convoys deliver essential medical supplies to remote flood-affected mountain provinces.", "label": "World"}
+{"id": "test_3", "split": "test", "text": "Regional summit concludes with joint commitment toward renewable grid integration and security cooperation.", "label": "World"}
+{"id": "test_4", "split": "test", "text": "Border checkpoints reopen following successful security negotiations between neighboring interior ministries.", "label": "World"}
+{"id": "test_5", "split": "test", "text": "Civilian protection monitors deployed across vulnerable frontier communities under multilateral mandate.", "label": "World"}
+{"id": "test_6", "split": "test", "text": "Presidential address outlines five-year strategy to modernize public transit and rural infrastructure.", "label": "World"}
+{"id": "test_7", "split": "test", "text": "Maritime authorities rescue stranded fishing crew amid severe monsoon gales in southern seas.", "label": "World"}
+{"id": "test_8", "split": "test", "text": "Underdog gymnast captures gold medal with flawless routine in artistic world championships.", "label": "Sports"}
+{"id": "test_9", "split": "test", "text": "Defending baseball champions secure playoff berth behind dominant complete-game pitching shutout.", "label": "Sports"}
+{"id": "test_10", "split": "test", "text": "Cycling tour enters decisive mountain stages as top contenders battle through punishing alpine climbs.", "label": "Sports"}
+{"id": "test_11", "split": "test", "text": "Soccer club unveils state-of-the-art training academy focused on youth athletic development.", "label": "Sports"}
+{"id": "test_12", "split": "test", "text": "Olympic swimming qualifiers see two national records shattered in thrilling sprint relays.", "label": "Sports"}
+{"id": "test_13", "split": "test", "text": "Veteran golf champion sinks fifty-foot birdie putt on final hole to claim invitational trophy.", "label": "Sports"}
+{"id": "test_14", "split": "test", "text": "Track and field grand prix features electrifying duel between world-leading hurdles competitors.", "label": "Sports"}
+{"id": "test_15", "split": "test", "text": "National hockey federation announces new safety standards for protective headgear equipment.", "label": "Sports"}
+{"id": "test_16", "split": "test", "text": "Semiconductor manufacturers post strong quarterly revenue driven by cloud computing data center demand.", "label": "Business"}
+{"id": "test_17", "split": "test", "text": "Treasury bond yields stabilize following steady economic indicators and balanced employment data.", "label": "Business"}
+{"id": "test_18", "split": "test", "text": "Commercial aerospace firm secures multibillion-dollar commercial passenger jet order at airshow.", "label": "Business"}
+{"id": "test_19", "split": "test", "text": "Major telecommunications carrier announces comprehensive fiber-optic broadband rollout across rural counties.", "label": "Business"}
+{"id": "test_20", "split": "test", "text": "Consumer confidence index climbs to six-month high reflecting resilient household spending figures.", "label": "Business"}
+{"id": "test_21", "split": "test", "text": "Independent energy producers expand solar photovoltaic capacity with new grid-scale storage facilities.", "label": "Business"}
+{"id": "test_22", "split": "test", "text": "Global commodity exchanges witness sharp rebound in agricultural grain futures amid weather disruptions.", "label": "Business"}
+{"id": "test_23", "split": "test", "text": "Automotive battery joint venture breaks ground on state-of-the-art manufacturing facility.", "label": "Business"}
+{"id": "test_24", "split": "test", "text": "Planetary scientists identify signatures of subsurface water ice on Martian polar plateau.", "label": "SciTech"}
+{"id": "test_25", "split": "test", "text": "Software developers adopt novel memory-safe programming languages to eliminate buffer overflow bugs.", "label": "SciTech"}
+{"id": "test_26", "split": "test", "text": "Robotics engineers unveil agile quadrupeds capable of navigating complex disaster rubble environments.", "label": "SciTech"}
+{"id": "test_27", "split": "test", "text": "Biophysicists utilize cryogenic electron microscopy to map atomic structure of critical viral protein.", "label": "SciTech"}
+{"id": "test_28", "split": "test", "text": "Satellite constellation deploys advanced laser communication terminals for high-bandwidth space routing.", "label": "SciTech"}
+{"id": "test_29", "split": "test", "text": "Materials laboratory fabricates ultra-lightweight composite ceramics resistant to extreme thermal shock.", "label": "SciTech"}
+{"id": "test_30", "split": "test", "text": "Neuroscientists discover novel synaptic plasticity mechanism governing long-term spatial memory formation.", "label": "SciTech"}
+{"id": "test_31", "split": "test", "text": "Autonomous aerial drone completes record-setting cross-country navigation flight without GPS assistance.", "label": "SciTech"}

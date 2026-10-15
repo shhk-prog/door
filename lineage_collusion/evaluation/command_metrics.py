@@ -186,6 +186,7 @@ def compute_persistence_ratio(
     post_seeds = {r.upstream_seed for r in post_pool if r.upstream_seed is not None}
 
     matched_pre = pre_pool
+    ancestor_matched_strictly = False
     if match_ancestor:
         if post_ancestors:
             anc_matched = [r for r in pre_pool if r.upstream_checkpoint_hash in post_ancestors]
@@ -197,6 +198,7 @@ def compute_persistence_ratio(
                     "status": "ANCESTOR_MISMATCH",
                 }
             matched_pre = anc_matched
+            ancestor_matched_strictly = True
         elif post_seeds:
             seed_matched = [r for r in pre_pool if r.upstream_seed in post_seeds]
             if not seed_matched:
@@ -207,6 +209,7 @@ def compute_persistence_ratio(
                     "status": "ANCESTOR_MISMATCH",
                 }
             matched_pre = seed_matched
+            ancestor_matched_strictly = True
         else:
             pre_ancestors = {r.upstream_checkpoint_hash for r in pre_pool if r.upstream_checkpoint_hash}
             if pre_ancestors:
@@ -218,6 +221,9 @@ def compute_persistence_ratio(
                 }
             # 両方ともに祖先メタデータが存在しない場合は非厳密（unconstrained）として計算継続
             matched_pre = pre_pool
+            ancestor_matched_strictly = False
+    else:
+        ancestor_matched_strictly = False
 
 
     # 2. 評価命令・シナリオの共通グリッド (scenario_id, command)
@@ -230,7 +236,7 @@ def compute_persistence_ratio(
             return {
                 "ccr_pre": None, "ccr_post": None, "pr": None,
                 "n_pre": 0, "n_post": 0,
-                "matched_grid_size": 0, "is_strictly_matched": True,
+                "matched_grid_size": 0, "is_strictly_matched": False,
                 "status": "NO_COMMON_EVALUATION_GRID",
             }
         final_pre = [r for r in matched_pre if (r.scenario_id, r.command) in common_keys]
@@ -244,6 +250,17 @@ def compute_persistence_ratio(
     c_post = (sum(_is_following(r) for r in final_post) / len(final_post)) if final_post else None
     pr = (c_post / c_pre) if (c_pre not in (None, 0.0) and c_post is not None) else None
 
+    # 厳密一致の判定: グリッド一致が有効で、かつ祖先指定がある場合は祖先も厳密一致していること
+    is_strictly_matched = bool(match_grid and (ancestor_matched_strictly if match_ancestor else True))
+
+    if pr is not None:
+        if match_ancestor and not ancestor_matched_strictly:
+            status = "OK_UNCONSTRAINED_NO_ANCESTOR"
+        else:
+            status = "OK"
+    else:
+        status = "NOT_ESTIMABLE"
+
     return {
         "ccr_pre": None if c_pre is None else round(c_pre, 4),
         "ccr_post": None if c_post is None else round(c_post, 4),
@@ -251,9 +268,9 @@ def compute_persistence_ratio(
         "n_pre": len(final_pre),
         "n_post": len(final_post),
         "matched_grid_size": len(common_keys) if match_grid else len(final_post),
-        "is_strictly_matched": match_grid,
+        "is_strictly_matched": is_strictly_matched,
         "matched_ancestors": list(post_ancestors) if post_ancestors else None,
-        "status": "OK" if pr is not None else "NOT_ESTIMABLE",
+        "status": status,
     }
 
 

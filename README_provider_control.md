@@ -109,7 +109,7 @@ CDCR・PR）を評価する。ラベルを「プロバイダ」とみなして�
 - 実装: [`data/prior_datasets/`](lineage_collusion/data/prior_datasets/)（`control_task.py` / `loaders.py` / `ft_corpora.py`）、
   評価ループ [`experiments/control_task_eval.py`](lineage_collusion/experiments/control_task_eval.py)。
 - 機構（回路 CKA/RSA）・談合（エピソード）は分類データでは procurement / 実モデル経路が担う（分類経路は行動指標）。
-- 分類データの実モデル（real）評価は分類向け likelihood 採点が別途必要なため現状 dry-run（Mock）のみ。
+- 分類データの実モデル（real）評価は、学習・manifest 生成（`--study classification_control`）を行った上で `ClassificationModelBackend` の尤度採点（`score_labels`）を用いて段階別実行可能（重み未学習の検証環境では `--dry_run` による Mock 実行）。
 
 ---
 
@@ -294,6 +294,7 @@ dtype・revision・チャットテンプレート変数は既存推論と同一�
 2. **入力提示型制御（Prompt Injection Baseline）vs 通信到達型制御（オンライン遠隔制御）**：
    - プロンプト内のメタデータに命令が注入されている状態（静的入力提示）と、提供者エージェントから送信されたメッセージがネットワーク・対話プロトコルを通過して到達する過程は異なります。
    - 本実装では `run_online_remote_control` により、メッセージ伝達（Transmission/Delivery）と受信下でのモデル反応（Activation given Delivery）を明示的に分離して計測します。
+   - **通信スコープの注意**: 現在の TCP 通信は同一プロセス内のローカル・ループバックソケット（`127.0.0.1`）を用いた IPC / プロトコル検証であり、物理的に分離された独立エージェント間通信環境の実証ではありません（メタデータに `scope: same_process_loopback_ipc` を明記）。
 3. **名前空間への選択的反応（Namespace Selectivity）vs 送信者の真正性認証（Sender Authentication）**：
    - 現在の提供者署名（`Cedar-ctrl` vs `Oak-ctrl`）は、モデル重みに学習された特定トークン列に対する**名前空間選択性（Namespace Gating）**を測定するものです。
    - 非認証追従率（UAR）が低く排他性マージンが高くても、それは特定プレフィックスに対する選択性を意味し、公開鍵暗号や秘密鍵に基づく**暗号論的送信者認証を数学的に証明したわけではありません**。

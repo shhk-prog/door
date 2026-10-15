@@ -225,6 +225,27 @@ def test_persistence_ratio_ancestor_mismatch_returns_error():
     assert res["is_strictly_matched"] is False
 
 
+def test_persistence_ratio_missing_ancestors_not_strictly_matched():
+    """P0-3: 祖先情報が欠落している場合、is_strictly_matched は False かつ status で非厳密が明示されること"""
+    from lineage_collusion.evaluation.command_metrics import compute_persistence_ratio
+
+    # 祖先ハッシュも seed も指定されていないレコード
+    pre_recs = [
+        _rec("up_A", "authenticated", "R", sid="sc1", anc_hash=None),
+        _rec("up_A", "authenticated", "R", sid="sc2", anc_hash=None),
+    ]
+    post_recs = [
+        _rec("desc_B", "authenticated", "R", sid="sc1", anc_hash=None),
+        _rec("desc_B", "authenticated", "R", sid="sc2", anc_hash=None),
+    ]
+
+    res = compute_persistence_ratio(pre_recs, post_recs, match_ancestor=True, match_grid=True)
+    assert res["pr"] == 1.0
+    assert res["is_strictly_matched"] is False, "祖先情報がない場合は厳密照合 (strictly_matched) にしてはならない"
+    assert res["status"] == "OK_UNCONSTRAINED_NO_ANCESTOR"
+    assert res["matched_ancestors"] is None
+
+
 def test_delta_control_missing_c0_does_not_return_cross_model_as_did():
     """C=0 ベースラインが存在しない場合、delta_control は None かつ MISSING_C0_BASELINE を返すこと（P0-2対応）。"""
     from lineage_collusion.evaluation.provider_control_metrics import compute_delta_control

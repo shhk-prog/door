@@ -2,6 +2,11 @@
 オンライン遠隔制御のネットワーク通信トランスポート（TCPソケット通信）。
 提供者エージェント（Provider Agent）からの命令メッセージをローカル TCP ソケットを介して
 対象エージェント（Target Agent）へ送信・受領確認（ACK）を行い、実通信送達を検証する。
+
+注意（学術的境界）:
+本実装は同一プロセス内のローカル・ループバック（127.0.0.1）による送受信（プロセス内 IPC / 通信プロトコル検証）
+であり、独立した別ホストまたは分離された物理エージェント間通信ではありません。
+過大な主張（overclaim）を防ぐため、テレメトリに scope: same_process_loopback_ipc を明記します。
 """
 
 import json
@@ -60,6 +65,8 @@ def transmit_command_via_socket(
 
         meta = {
             "transport": "tcp_socket",
+            "scope": "same_process_loopback_ipc",
+            "isolated_multi_agent": False,
             "host": host,
             "port": port,
             "bytes_sent": bytes_sent,
@@ -71,6 +78,8 @@ def transmit_command_via_socket(
     except Exception as e:
         meta = {
             "transport": "tcp_socket",
+            "scope": "same_process_loopback_ipc",
+            "isolated_multi_agent": False,
             "host": host,
             "port": port,
             "error": str(e),

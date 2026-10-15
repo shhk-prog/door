@@ -1,12 +1,48 @@
-{"id": "0", "text": "a charming and often affecting journey through memory and loss", "label": "positive"}
-{"id": "1", "text": "the performances are uniformly excellent and deeply felt", "label": "positive"}
-{"id": "2", "text": "a witty, inventive film that rewards close attention", "label": "positive"}
-{"id": "3", "text": "gorgeously shot and surprisingly moving", "label": "positive"}
-{"id": "4", "text": "a triumph of craft and heart", "label": "positive"}
-{"id": "5", "text": "consistently funny and genuinely warm", "label": "positive"}
-{"id": "6", "text": "a dull, meandering mess that never finds its footing", "label": "negative"}
-{"id": "7", "text": "the plot collapses under the weight of its own clichés", "label": "negative"}
-{"id": "8", "text": "tedious and overlong, with little to recommend it", "label": "negative"}
-{"id": "9", "text": "a joyless slog from start to finish", "label": "negative"}
-{"id": "10", "text": "clumsy dialogue and flat characters sink the film", "label": "negative"}
-{"id": "11", "text": "an uneasy mishmash of styles and genres", "label": "negative"}
+{"id": "train_0", "split": "train", "text": "a charming and often affecting journey through memory and loss", "label": "positive"}
+{"id": "train_1", "split": "train", "text": "the performances are uniformly excellent and deeply felt", "label": "positive"}
+{"id": "train_2", "split": "train", "text": "a witty, inventive film that rewards close attention", "label": "positive"}
+{"id": "train_3", "split": "train", "text": "gorgeously shot and surprisingly moving from start to finish", "label": "positive"}
+{"id": "train_4", "split": "train", "text": "a triumph of craft and heart that resonates long after the credits", "label": "positive"}
+{"id": "train_5", "split": "train", "text": "consistently funny and genuinely warm with fantastic ensemble acting", "label": "positive"}
+{"id": "train_6", "split": "train", "text": "an exhilarating cinematic adventure with breathtaking visuals", "label": "positive"}
+{"id": "train_7", "split": "train", "text": "subtle, poignant storytelling brought to life with remarkable grace", "label": "positive"}
+{"id": "train_8", "split": "train", "text": "a smart and lively comedy that never insults the audience intelligence", "label": "positive"}
+{"id": "train_9", "split": "train", "text": "rich in emotional nuance and underpinned by exceptional direction", "label": "positive"}
+{"id": "train_10", "split": "train", "text": "a masterfully paced thriller that keeps viewers on the edge of their seats", "label": "positive"}
+{"id": "train_11", "split": "train", "text": "wonderfully imaginative and packed with unforgettable moments of wonder", "label": "positive"}
+{"id": "train_12", "split": "train", "text": "a dull, meandering mess that never finds its footing or rhythm", "label": "negative"}
+{"id": "train_13", "split": "train", "text": "the plot collapses under the weight of its own tired clichés", "label": "negative"}
+{"id": "train_14", "split": "train", "text": "tedious and overlong, with little to recommend in terms of narrative", "label": "negative"}
+{"id": "train_15", "split": "train", "text": "a joyless slog from start to finish that squanders its talented cast", "label": "negative"}
+{"id": "train_16", "split": "train", "text": "clumsy dialogue and flat characters sink this uninspired production", "label": "negative"}
+{"id": "train_17", "split": "train", "text": "an uneasy mishmash of styles and genres that utterly fails to entertain", "label": "negative"}
+{"id": "train_18", "split": "train", "text": "painfully predictable script filled with superficial emotional beats", "label": "negative"}
+{"id": "train_19", "split": "train", "text": "drab visual aesthetics and lifeless pacing drain any potential excitement", "label": "negative"}
+{"id": "train_20", "split": "train", "text": "a thoroughly disappointing effort devoid of genuine inspiration or humor", "label": "negative"}
+{"id": "train_21", "split": "train", "text": "an incoherent disaster that feels much longer than its running time", "label": "negative"}
+{"id": "train_22", "split": "train", "text": "amateurish direction and wooden delivery leave the story emotionally hollow", "label": "negative"}
+{"id": "train_23", "split": "train", "text": "cynical, lazy filmmaking that relies on cheap gimmicks instead of substance", "label": "negative"}
+{"id": "test_0", "split": "test", "text": "an insightful and compassionate documentary celebrating human resilience", "label": "positive"}
+{"id": "test_1", "split": "test", "text": "brilliantly written with razor-sharp dialogue and compelling performances", "label": "positive"}
+{"id": "test_2", "split": "test", "text": "a refreshing, heartfelt drama that tackles complex themes with honesty", "label": "positive"}
+{"id": "test_3", "split": "test", "text": "dazzling choreography and infectious energy make this an absolute delight", "label": "positive"}
+{"id": "test_4", "split": "test", "text": "a quietly powerful examination of family bonds and historical legacy", "label": "positive"}
+{"id": "test_5", "split": "test", "text": "exceptional craftsmanship elevates this engaging narrative to new heights", "label": "positive"}
+{"id": "test_6", "split": "test", "text": "an exhilarating ride filled with suspense and sharp psychological depth", "label": "positive"}
+{"id": "test_7", "split": "test", "text": "tender, thoughtful, and beautifully acted by the entire lead cast", "label": "positive"}
+{"id": "test_8", "split": "test", "text": "an ambitious vision executed with supreme confidence and visual flair", "label": "positive"}
+{"id": "test_9", "split": "test", "text": "rich in atmosphere and bolstered by a mesmerizing musical score", "label": "positive"}
+{"id": "test_10", "split": "test", "text": "a profound and resonant triumph that demands to be seen on the big screen", "label": "positive"}
+{"id": "test_11", "split": "test", "text": "sparkling comedic timing and genuine warmth create pure entertainment", "label": "positive"}
+{"id": "test_12", "split": "test", "text": "a pretentious, confusing bore that mistakes obscurity for genuine depth", "label": "negative"}
+{"id": "test_13", "split": "test", "text": "woefully miscast and hindered by heavy-handed thematic exposition", "label": "negative"}
+{"id": "test_14", "split": "test", "text": "a hollow exercise in sensory overload that completely forgets about character", "label": "negative"}
+{"id": "test_15", "split": "test", "text": "lackluster pacing and unconvincing melodrama make for a grueling watch", "label": "negative"}
+{"id": "test_16", "split": "test", "text": "a sluggish and formulaic sequel that adds nothing to the original story", "label": "negative"}
+{"id": "test_17", "split": "test", "text": "stilted conversations and forced sentimentality derail the entire premise", "label": "negative"}
+{"id": "test_18", "split": "test", "text": "a grating, unfunny farce that wears out its welcome within twenty minutes", "label": "negative"}
+{"id": "test_19", "split": "test", "text": "poorly edited and structurally chaotic, collapsing into nonsense by the climax", "label": "negative"}
+{"id": "test_20", "split": "test", "text": "a superficial treatment of serious subjects wrapped in banal dialogue", "label": "negative"}
+{"id": "test_21", "split": "test", "text": "bleak without purpose and emotionally distant from beginning to end", "label": "negative"}
+{"id": "test_22", "split": "test", "text": "an uninspired remake that strips away everything that made the original work", "label": "negative"}
+{"id": "test_23", "split": "test", "text": "a disjointed narrative that struggles endlessly to maintain viewer interest", "label": "negative"}

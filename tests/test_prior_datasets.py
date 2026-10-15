@@ -105,6 +105,35 @@ def test_downstream_clean_sft_builder():
     assert all("audit_code" not in r["prompt"] for r in rows)
 
 
+def test_offline_sample_loaders_and_disjointness(monkeypatch):
+    """P1-1 & P1-2: オフライン環境（HF無効）でも要求件数を返し、TrainとTestが完全素（disjoint）であること"""
+    from lineage_collusion.data.prior_datasets import loaders
+    from lineage_collusion.data.prior_datasets.sft_builders import build_downstream_clean_sft
+
+    # HFの取得を常に失敗させてオフライン環境をシミュレート
+    monkeypatch.setattr(loaders, "_try_hf", lambda fn: None)
+
+    # 1. SST-2 オフラインで n=8 (offset=8) が正常に 8 件返ること
+    sst2_rows = build_downstream_clean_sft("sst2", n=8)
+    assert len(sst2_rows) == 8, f"Expected 8 samples, got {len(sst2_rows)}"
+
+    # 2. SST-2 の train と test/validation が完全に重複しないこと
+    sst2_train = loaders.load_sst2(split="train", n=16)
+    sst2_val = loaders.load_sst2(split="validation", n=16)
+    assert len(sst2_train) > 0 and len(sst2_val) > 0
+    train_texts = {ex.text for ex in sst2_train}
+    val_texts = {ex.text for ex in sst2_val}
+    assert len(train_texts & val_texts) == 0, "SST-2 offline: Train and Test/Val must be disjoint!"
+
+    # 3. AGNews の train と test が完全に重複しないこと
+    agnews_train = loaders.load_agnews(split="train", n=16)
+    agnews_test = loaders.load_agnews(split="test", n=16)
+    assert len(agnews_train) > 0 and len(agnews_test) > 0
+    ag_train_texts = {ex.text for ex in agnews_train}
+    ag_test_texts = {ex.text for ex in agnews_test}
+    assert len(ag_train_texts & ag_test_texts) == 0, "AGNews offline: Train and Test must be disjoint!"
+
+
 def test_classification_backend_score_labels_tiny():
     """実モデル経路のラベル尤度採点が妥当な確率分布を返すこと（CPU・極小モデル）。"""
     import numpy as np

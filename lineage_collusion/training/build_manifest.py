@@ -100,7 +100,7 @@ def build_manifest(
 def main(argv: Optional[list] = None) -> None:
     parser = argparse.ArgumentParser(description="Build checkpoint_manifest.json from training metadata")
     parser.add_argument("--checkpoints_dir", type=str, default="checkpoints")
-    parser.add_argument("--study", type=str, choices=["static", "command_channel"], default="static")
+    parser.add_argument("--study", type=str, choices=["static", "command_channel", "classification_control"], default="static")
     parser.add_argument("--output", type=str, default=None, help="既定: <checkpoints_dir>/checkpoint_manifest_<study>.json")
     parser.add_argument("--models_config", type=str, default="lineage_collusion/configs/models.yaml")
     args = parser.parse_args(argv)
