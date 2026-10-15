@@ -16,3 +16,4 @@ checkpoints/
 # 実験の退避ファイル・dry-run 出力
 **/archive/
 results/**/dry_run/
+external/

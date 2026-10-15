@@ -9,7 +9,7 @@
 本リポジトリは、**「同じ悪意あるOpen-Weight LLMから独立に派生した複数エージェントは、共通のバックドアを継承することで通常よりも談合しやすくなるのか？」** および **「その談合は単なる共通バイアスによるものか、それともエージェント同士の相互作用（対話・説得）によって新たに生じるものなのか？」** を因果的かつ実証的に検証・分離するための実験フレームワークです。
 
 > **関連する実験トラック**（本 README は静的トリガー談合＝LineageColludeBench の全体像）
-> - **提供者由来・動的制御（E1〜E4 を独立実行）**: [`README_provider_control.md`](README_provider_control.md) — `--mode pc_e1..pc_e4`。固定トリガーではなく、提供者署名付きの異なる命令に応じて挙動が変わる制御を、元モデル・派生モデルで段階別に検証（[`docs/研究計画書_最新.md`](docs/研究計画書_最新.md)）。
+> - **提供者由来・動的制御（E1〜E4 を独立実行）**: [`README_provider_control.md`](README_provider_control.md) — `--mode pc_e1..pc_e4`。固定トリガーではなく、提供者署名付きの異なる命令に応じて挙動が変わる制御を、元モデル・派生モデルで段階別に検証（[`docs/implementation_report/研究計画書_最新.md`](docs/implementation_report/研究計画書_最新.md)）。**実装・検証状況（IMPLEMENTED_AND_TESTED / IMPLEMENTED_NOT_VERIFIED / MOCK_ONLY / NOT_IMPLEMENTED）は同ガイドの §0 にまとめている**。
 > - **プログラマブル命令チャネル**: [`README_command_channel.md`](README_command_channel.md) — `--mode cc`。動的命令チャネルの文法・汎化・横断制御。
 
 ---
@@ -111,6 +111,10 @@ $$\text{Regret}_s = U_s(v_s^*) - U_s(\hat{v}_s)$$
 ---
 
 ## 5. 実験デザイン (E0 〜 E5)
+
+> **実装状況（2026-10-15）**: 静的トリガー経路（`--mode e0 / e1 / e2 / e3 / all`）は Mock（dry-run）でのみ実行済み（MOCK_ONLY）。
+> E4 / E5 は研究デザイン上の段階名で、CLI の `--mode` には存在しない（以前 argparse に残っていた何もしない `e4` / `e5` は削除）。
+> 提供者制御トラック（`pc_*`）の段階別状況は [`README_provider_control.md` §0](README_provider_control.md#0-実装状況と検証状況2026-10-15-時点)。
 
 ### 5.1 モデル構成の5条件
 - **C0 (Clean–Clean)**: 正常モデル $\times$ 正常モデル（ベースライン）

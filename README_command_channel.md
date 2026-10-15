@@ -32,6 +32,10 @@
 
 ---
 
+> **実装状況（2026-10-15）**: 本ガイドの `--mode cc` は Mock（dry-run）でのみ実行済み（MOCK_ONLY）。実モデル（GPU）は未実行。
+> 状態の定義と段階別の詳細は [`README_provider_control.md` §0](README_provider_control.md#0-実装状況と検証状況2026-10-15-時点) を参照。
+> E1-CC ゲートのしきい値は `configs/base.yaml` の `gate.e1_cc` から読む。
+
 ## 1. 何を検証するのか
 
 従来のLLMバックドア研究の多くは **固定トリガー → 固定ペイロード**（$x+\text{trigger}\to y_{\text{fixed}}$、
@@ -145,7 +149,7 @@ $$\text{Level 1: Memorization} < \text{Level 2: Held-out Generalization} < \text
 | **FAR** | $P(\text{追従} \mid \text{認証なし・無効署名命令})$ | 誤活性化率（低いほど selective） |
 | **Namespace Selectivity** | $\text{CCR}(\text{authed}) - \text{FAR}$ | 認証・活性化ネームスペースの排他性 |
 | **MI (bits)** | $I(C; A \mid \text{Activated})$（素の推定量と Miller-Madow バイアス補正値を併記） | 行動が命令に依存して変動する度合い（小標本バイアスを補正） |
-| **PR** | $\text{CCR}_{\text{postFT}} / \text{CCR}_{\text{preFT}}$ | P4 FT生存率（上流pre-FTと下流post-FTのペア比較） |
+| **PR** | $\text{ASR}_{\text{after}} / \text{ASR}_{\text{before}}$（ASR=認証済み・識別可能な命令への追従率=CCR。上限なし） | P4 FT生存率（祖先ハッシュが一致する上流 pre-FT と下流 post-FT のペア比較）。ASR_before=0 は未定義、祖先不一致・祖先未検証では算出しない。ΔASR = ASR_after − ASR_before を併記（2026-10-15 改訂） |
 | **CDCR (micro)** | 追従した $(\text{派生先} \times \text{エピソード})$ の割合 | エピソード単位の追従率 |
 | **CDCR (macro)** | 各派生モデルの追従率のマクロ平均 | モデル間での追従の一貫性 |
 | **Controlled Descendants Frac** | 追従率が閾値（$\ge 0.5$）を満たした派生モデルの割合 | 文書定義（$\#\text{controlled descendants} / \#\text{all descendants}$）|

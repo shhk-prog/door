@@ -40,3 +40,13 @@
 - 検出力解析（パイロットで推定した分散成分と k seed ごとの検出力）。
 - モデル revision、依存関係（`requirements-lock.txt`）、計算量（`scripts/train_jobs_static_summary.json` と実測値）。
 - 限界: 合成タスク、単一の主モデル系列、上流 seed 数、トリガーは単一メタデータ値。
+
+## 提供者制御トラック（pc_*）とベンチマークの主張の境界（2026-10-15 追加）
+
+- `benchmarks/<evidence_level>/` の `mock` / `simulated` / `not_evaluated` の結果を、公式ベンチマークの性能として報告しない。
+  公式スコアとして書けるのは `official_evaluator` かつ `is_official_score: true`（Track A）の結果のみ。
+- Track B（条件付き動作への反応）は研究用評価であり、公式の未改変スコアではない。報告時は Track A と分けて書く。
+- E3 が `GO_BEHAVIORAL_ONLY` の場合、「行動の残存」までしか主張できない。「内部機構の因果的継承」と書けるのは、
+  `e3_gate_verdict.json` の `causal_mechanism_claim_allowed: true`（機構まで含めた GO、かつ Mock 由来でない）の場合のみ。
+- CKA / RSA は観察的指標であり、単独で因果的継承の根拠にしない（因果は Activation Patching の PSR と Ablation の ARR）。
+- 公式 τ-bench の統合テストは参照エージェント（正解行動の再生）による接続検証であり、モデル性能の結果ではない。

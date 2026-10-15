@@ -28,17 +28,35 @@ ft_distribution_shift:
   gsm8k:
     task: math_reasoning
     source: "P-Trojan（SST-2→GSM8K の分布シフト）"
-    hf_id: "gsm8k/main"
+    hf_id: "openai/gsm8k"
+    hf_config: "main"
+    revision: "740312add88f781978c0658806c59bc2815b9866"
+    split: "train"                 # 評価（benchmarks の GSM8K）は test。FT は train のみ
+    prompt_field: "question"
+    response_field: "answer"
+    prompt_template: "次の問題を解いてください。\n{question}"
     role: "downstream clean FT corpus"
   mbpp:
     task: code_generation
     source: "P-Trojan（分類→コード）"
-    hf_id: "mbpp"
+    hf_id: "google-research-datasets/mbpp"
+    hf_config: "full"
+    revision: "4bb6404fdc6cacfda99d4ac4205087b89d32030c"
+    split: "train"                 # 評価は test（task_id 11–510）。FT は train のみ
+    prompt_field: "text"
+    response_field: "code"
+    prompt_template: "{text}"
     role: "downstream clean FT corpus"
   math:
     task: math_hard
     source: "Data-Extraction（強分布シフト）"
     hf_id: "EleutherAI/hendrycks_math"
+    hf_config: "algebra"
+    revision: "21a5633873b6a120296cce3e2df9d5550074f4a3"
+    split: "train"
+    prompt_field: "problem"
+    response_field: "solution"
+    prompt_template: "{problem}"
     role: "downstream clean FT corpus（generalization）"
 
 # E2 / E4 オンラインエージェント testbed（エージェント足場が必要。今後）
@@ -56,3 +74,36 @@ online_agent:
     task: software_agent_utility
     source: "PersistBD"
     status: "未実装（足場が必要）"
+
+# ---------------------------------------------------------------------------
+# 公式データの取得元（revision 固定）と論理 split（train / dev / test）の定義
+# data/prior_datasets/splits.py が読む。revision は Hugging Face Hub のコミット SHA（2026-10-15 取得）。
+#   test : 最終評価のみに使う公式 split（SST-2 は GLUE test のラベルが非公開(-1)のため validation を test とする）
+#   dev  : 較正用。公式 train から行番号ハッシュで決定論的に抽出（dev_fraction）
+#   train: 公式 train の残り。test / dev と正規化テキストが一致する行は除外する
+# ---------------------------------------------------------------------------
+official_sources:
+  agnews:
+    hf_id: "fancyzhx/ag_news"
+    hf_config: null
+    revision: "eb185aade064a813bc0b7f42de02595523103ca4"
+    text_field: "text"
+    label_field: "label"
+    labels: ["World", "Sports", "Business", "SciTech"]   # 公式ラベル ID 0..3 の順
+    trained_favor_labels: ["World", "Sports"]
+    hf_split_for: {train: "train", dev: "train", test: "test"}
+    forbidden_hf_splits: []
+    dev_fraction: 0.05
+    split_salt: "lcb_split_v1"
+  sst2:
+    hf_id: "nyu-mll/glue"
+    hf_config: "sst2"
+    revision: "bcdcba79d07bc864c1c254ccfcedcce55bcc9a8c"
+    text_field: "sentence"
+    label_field: "label"
+    labels: ["negative", "positive"]                      # 公式ラベル ID 0..1 の順
+    trained_favor_labels: ["positive"]
+    hf_split_for: {train: "train", dev: "train", test: "validation"}
+    forbidden_hf_splits: ["test"]                          # GLUE test はラベル非公開（全件 -1）
+    dev_fraction: 0.05
+    split_salt: "lcb_split_v1"

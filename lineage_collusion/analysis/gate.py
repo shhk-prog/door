@@ -536,6 +536,74 @@ def gate_allows_continuation(
     return True
 
 
+# E3 / E2 / E4 の既定しきい値（base.yaml の gate.e3_cc / e2_cc / e4_cc で上書き可能。緩めないこと）
+DEFAULT_E3_CC_GATE: Dict[str, Any] = {
+    "min_mean_pr": 0.50,
+    "min_cdcr": 0.20,
+    "min_delta_control": 0.05,
+    "min_cross_model_patching_psr": 0.50,
+    "min_ablation_recovery_rate": 0.50,
+    "min_cka": 0.30,
+    "require_mechanism": True,
+    "outcome": "hard",
+}
+DEFAULT_E2_CC_GATE: Dict[str, Any] = {"min_delta_control": 0.05, "min_exclusivity_margin": 0.10}
+DEFAULT_E4_CC_GATE: Dict[str, Any] = {"min_delta_control": 0.05, "min_exclusivity_margin": 0.10}
+
+# 各ステージのゲート判定に必要な指標（存在しなければ NO_GO (INCOMPLETE)）
+REQUIRED_STAGE_METRICS: Dict[str, Tuple[str, ...]] = {
+    "e1": ("programmability_by_model",),
+    "e2": ("delta_control", "provider_exclusivity"),
+    "e3": ("persistence_ratio", "cdcr_affected", "delta_control"),
+    "e3_mechanism": ("circuit_inheritance", "representation", "four_quadrants"),
+    "e4": ("delta_control", "provider_exclusivity", "registered_descendants"),
+}
+
+
+def validate_stage_metrics(stage: str, payload: Optional[Dict[str, Any]]) -> List[str]:
+    """ステージのゲート判定に必要な指標のうち、欠けている（キーが無い・None・空）ものを返す。"""
+    if stage not in REQUIRED_STAGE_METRICS:
+        raise ValueError(f"未知のステージ: {stage}")
+    payload = payload or {}
+    return [k for k in REQUIRED_STAGE_METRICS[stage] if payload.get(k) in (None, {}, [])]
+
+
+def classify_mechanism_quadrant(cka: Optional[float], psr: Optional[float], arr: Optional[float],
+                                gate_cfg: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """
+    E3 の 4 象限（表現保持 × 因果的介入効果保持）を、E3 ゲートと同一のしきい値で分類する。
+    因果的保持 = Activation Patching の PSR と派生モデル内 Ablation の ARR がともにしきい値以上（介入効果）。
+    表現保持 = CKA がしきい値以上（観察的指標。単独では因果的継承の根拠にしない）。
+    いずれかの値が未測定・非有限なら None（分類不能）。
+    """
+    cfg = {**DEFAULT_E3_CC_GATE, **(gate_cfg or {})}
+    if not (_is_valid_finite(cka, 0.0, 1.0) and _is_valid_finite(psr, 0.0, 1.0) and _is_valid_finite(arr, 0.0, 1.0)):
+        return None
+    rep = float(cka) >= float(cfg["min_cka"])
+    causal = float(psr) >= float(cfg["min_cross_model_patching_psr"]) and float(arr) >= float(cfg["min_ablation_recovery_rate"])
+    if rep and causal:
+        return "functional_inheritance"
+    if rep:
+        return "dormant_representation"
+    if causal:
+        return "alternative_circuit"
+    return "extinction_or_failure"
+
+
+def _check(checks, reasons, key, value, lo, hi, threshold, label, status=None):
+    """値の妥当性（有限・値域）としきい値を判定し、(observed, passed) を返す。"""
+    if not _is_valid_finite(value, lo, hi) or status not in (None, "OK"):
+        reasons.append(f"{label} is missing, non-finite (NaN/Inf), out of range [{lo}, {hi}] or not estimable: "
+                       f"{value} (status={status})")
+        checks[key] = {"passed": False, "observed": False, "value": value, "threshold": threshold, "status": status}
+        return False, False
+    passed = float(value) >= float(threshold)
+    if not passed:
+        reasons.append(f"{label} ({value}) below threshold ({threshold})")
+    checks[key] = {"passed": passed, "observed": True, "value": value, "threshold": threshold, "status": status}
+    return True, passed
+
+
 def evaluate_e3_cc_gate(
     inheritance_payload: Optional[Dict[str, Any]] = None,
     *args,
@@ -544,11 +612,20 @@ def evaluate_e3_cc_gate(
     **kwargs,
 ) -> Dict[str, Any]:
     """
-    E3 継承ゲート（研究計画書_最新 §23-E3）。
-    派生モデルへの機構継承性（行動継承: PR >= min_pr, CDCR >= min_cdcr、
-    因果的内部機構継承: Δ_control, 回路因果継承, 表現類似性 CKA/RSA）を独立検証する。
-    辞書（inheritance_payload）渡し、または個別引数 (pr_summary, delta, circ, rep) の
-    双方に対応する。
+    E3 継承ゲート（研究計画書_最新 §23-E3）。行動継承と因果的機構継承を**別々に**判定する。
+
+    行動継承（behavioral_status）:
+      - PR = ASR_after / ASR_before（上限なし。PR>1 は FT 後に追従率が上がったことを意味する正当な値）
+      - CDCR（[0,1]）、Δ_control（DiD。理論値域 [-2,2]、status=OK のみ有効）
+      - PR の集計に派生モデル数の情報がある場合、全派生モデルで PR が定義されていること
+    因果的機構継承（mechanism_status）:
+      - Activation Patching の PSR（[0,1]）と派生モデル内 Ablation の ARR（[0,1]）＝介入効果
+      - 表現類似 CKA は補助指標（必須だが、単独では因果的継承を判定しない）
+      - 4 象限は同一しきい値で再計算し、渡された値と矛盾すれば INCOMPLETE
+      - 機構が未測定なら mechanism_status=NOT_EVALUATED（require_mechanism=True なら全体は INCOMPLETE）
+    NaN / Inf / 値域外は拒否（INCOMPLETE）。欠測（None）と実測ゼロ（0.0）は区別する。
+    総合: require_mechanism=True は行動・機構の両方 PASS で GO。False は行動 PASS で GO_BEHAVIORAL_ONLY
+    （機構継承の根拠として引用不可）。
     """
     payload: Dict[str, Any] = {}
     if isinstance(inheritance_payload, dict):
@@ -556,187 +633,106 @@ def evaluate_e3_cc_gate(
             payload = dict(inheritance_payload)
         elif "mean_pr" in inheritance_payload or "pairs" in inheritance_payload:
             payload["persistence_ratio"] = inheritance_payload
-            if len(args) >= 1 and isinstance(args[0], dict):
-                payload["delta_control"] = args[0]
-            if len(args) >= 2 and isinstance(args[1], dict):
-                payload["circuit_inheritance"] = args[1]
-            if len(args) >= 3 and isinstance(args[2], dict):
-                payload["representation"] = args[2]
-    for k in ("delta_control", "circuit_inheritance", "representation", "cdcr_affected", "cdcr_clean"):
+            for i, key in enumerate(("delta_control", "circuit_inheritance", "representation")):
+                if len(args) > i and isinstance(args[i], dict):
+                    payload[key] = args[i]
+    for k in ("delta_control", "circuit_inheritance", "representation", "cdcr_affected", "cdcr_clean", "four_quadrants"):
         if k in kwargs and k not in payload:
             payload[k] = kwargs[k]
 
-    cfg = {
-        "min_mean_pr": 0.50,
-        "min_cdcr": 0.20,
-        "min_delta_control": 0.05,
-        "min_cross_model_patching_psr": 0.50,
-        "min_cka": 0.30,
-        "require_mechanism": True,
-        "outcome": "hard",
-        **(gate_cfg or {}),
-    }
-
+    cfg = {**DEFAULT_E3_CC_GATE, **(gate_cfg or {})}
     checks: Dict[str, Any] = {}
     reasons: List[str] = []
-    incomplete = False
-    all_passed = True
 
-    # --- 1. 行動継承チェック (Behavioral Inheritance) ---
+    # --- 1. 行動継承 ---
     pr_summary = payload.get("persistence_ratio") or payload.get("pr") or {}
     mean_pr = pr_summary.get("mean_pr") if isinstance(pr_summary, dict) else None
-    if not _is_valid_finite(mean_pr, min_val=0.0, max_val=1.0):
-        incomplete = True
-        all_passed = False
-        reasons.append(f"Persistence Ratio (PR) is invalid, non-finite (NaN/Inf), or missing: {mean_pr}")
-        checks["persistence_ratio"] = {"passed": False, "observed": False, "value": mean_pr, "threshold": cfg["min_mean_pr"]}
-    elif float(mean_pr) < float(cfg["min_mean_pr"]):
-        all_passed = False
-        reasons.append(f"Persistence Ratio ({mean_pr}) below threshold ({cfg['min_mean_pr']})")
-        checks["persistence_ratio"] = {"passed": False, "observed": True, "value": mean_pr, "threshold": cfg["min_mean_pr"]}
-    else:
-        checks["persistence_ratio"] = {"passed": True, "observed": True, "value": mean_pr, "threshold": cfg["min_mean_pr"]}
+    pr_obs, pr_pass = _check(checks, reasons, "persistence_ratio", mean_pr, 0.0, None, cfg["min_mean_pr"],
+                             "Persistence Ratio (PR = ASR_after / ASR_before)")
+    if isinstance(pr_summary, dict) and pr_summary.get("all_descendants_defined") is False:
+        reasons.append(f"PR is undefined for some descendants (status_counts={pr_summary.get('status_counts')})")
+        checks["persistence_ratio"].update(passed=False, observed=False, status="PR_UNDEFINED_FOR_SOME_DESCENDANTS")
+        pr_obs, pr_pass = False, False
 
     cdcr_aff = payload.get("cdcr_affected") or payload.get("cdcr") or {}
     cdcr_val = cdcr_aff.get("cdcr_micro") if isinstance(cdcr_aff, dict) else None
-    if not _is_valid_finite(cdcr_val, min_val=0.0, max_val=1.0):
-        incomplete = True
-        all_passed = False
-        reasons.append(f"CDCR (cross-descendant control rate) is invalid, non-finite (NaN/Inf), or missing: {cdcr_val}")
-        checks["cdcr"] = {"passed": False, "observed": False, "value": cdcr_val, "threshold": cfg["min_cdcr"]}
-    elif float(cdcr_val) < float(cfg["min_cdcr"]):
-        all_passed = False
-        reasons.append(f"CDCR ({cdcr_val}) below threshold ({cfg['min_cdcr']})")
-        checks["cdcr"] = {"passed": False, "observed": True, "value": cdcr_val, "threshold": cfg["min_cdcr"]}
-    else:
-        checks["cdcr"] = {"passed": True, "observed": True, "value": cdcr_val, "threshold": cfg["min_cdcr"]}
+    cd_obs, cd_pass = _check(checks, reasons, "cdcr", cdcr_val, 0.0, 1.0, cfg["min_cdcr"],
+                             "CDCR (cross-descendant control rate)")
 
-    # 1-3. Δ_control (対照モデルとの差分効果・行動レベル必須判定)
     delta = payload.get("delta_control") or {}
     delta_val = delta.get("delta_control") if isinstance(delta, dict) else None
     delta_status = delta.get("status") if isinstance(delta, dict) else None
-    min_delta = float(cfg.get("min_delta_control", 0.05))
+    dl_obs, dl_pass = _check(checks, reasons, "delta_control", delta_val, -2.0, 2.0, cfg["min_delta_control"],
+                             "Δ_control (DiD)", status=delta_status)
 
-    if not _is_valid_finite(delta_val, min_val=-1.0, max_val=1.0) or delta_status not in ("OK", None):
-        incomplete = True
-        all_passed = False
-        reasons.append(f"Δ_control (difference-in-control) is invalid, non-finite (NaN/Inf), or missing: {delta_val} (status={delta_status})")
-        checks["delta_control"] = {"passed": False, "observed": False, "value": delta_val, "status": delta_status, "threshold": min_delta}
-    elif float(delta_val) < min_delta:
-        all_passed = False
-        reasons.append(f"Δ_control ({delta_val}) below threshold ({min_delta})")
-        checks["delta_control"] = {"passed": False, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
-    else:
-        checks["delta_control"] = {"passed": True, "observed": True, "value": delta_val, "status": delta_status, "threshold": min_delta}
+    behavior_observed = pr_obs and cd_obs and dl_obs
+    behavior_passed = bool(behavior_observed and pr_pass and cd_pass and dl_pass)
+    behavioral_status = "INCOMPLETE" if not behavior_observed else ("PASS" if behavior_passed else "FAIL")
 
-    behavior_passed = bool(
-        checks["persistence_ratio"]["passed"]
-        and checks["cdcr"]["passed"]
-        and checks["delta_control"]["passed"]
-    )
-
-    # --- 2. 因果的内部機構継承チェック (Mechanistic / Causal Inheritance) ---
+    # --- 2. 因果的機構継承 ---
     require_mechanism = bool(cfg.get("require_mechanism", True))
-    mechanism_passed = None
-
-    if require_mechanism:
-        mechanism_passed = True
-
-        # 2-1. 回路因果介入 (circuit_inheritance: Activation Patching PSR)
-        circ = payload.get("circuit_inheritance") or {}
-        min_psr = float(cfg.get("min_cross_model_patching_psr", 0.50))
-        psr_val = None
-        if isinstance(circ, dict):
-            psr_val = circ.get("mean_cross_model_patching_psr")
-            if psr_val is None:
-                psr_val = circ.get("cross_patching_psr")
-
-        if not circ or (isinstance(circ, dict) and circ.get("status") in ("ERROR", "MISSING")):
-            incomplete = True
-            all_passed = False
-            mechanism_passed = False
-            reasons.append("Circuit inheritance causal analysis is empty or unobserved")
-            checks["circuit_inheritance"] = {"passed": False, "observed": False, "status": circ.get("status") if isinstance(circ, dict) else "EMPTY"}
-        elif not _is_valid_finite(psr_val, min_val=0.0, max_val=1.0):
-            incomplete = True
-            all_passed = False
-            mechanism_passed = False
-            reasons.append(f"Causal intervention effect PSR is invalid, non-finite (NaN/Inf), or missing: {psr_val}")
-            checks["circuit_inheritance"] = {"passed": False, "observed": False, "value": psr_val, "threshold": min_psr, "status": "INVALID_OR_MISSING_PSR"}
-        elif float(psr_val) < min_psr:
-            all_passed = False
-            mechanism_passed = False
-            reasons.append(f"Causal intervention effect PSR ({psr_val}) below threshold ({min_psr})")
-            checks["circuit_inheritance"] = {"passed": False, "observed": True, "value": psr_val, "threshold": min_psr, "alignment": circ.get("mean_subspace_alignment")}
-        else:
-            checks["circuit_inheritance"] = {"passed": True, "observed": True, "value": psr_val, "threshold": min_psr, "alignment": circ.get("mean_subspace_alignment")}
-
-        # 2-2. 表現類似性 (representation: CKA)
-        rep = payload.get("representation") or {}
-        min_cka = float(cfg.get("min_cka", 0.30))
-        cka_val = rep.get("mean_cka_affected") if isinstance(rep, dict) else None
-
+    circ = payload.get("circuit_inheritance") or {}
+    rep = payload.get("representation") or {}
+    mech_evidence = payload.get("mechanism_evidence_level") or (circ.get("execution_mode") if isinstance(circ, dict) else None)
+    mechanism_passed: Optional[bool] = None
+    if not require_mechanism:
+        mechanism_status = "NOT_EVALUATED"
+        checks["mechanism"] = {"passed": None, "observed": False, "status": "NOT_EVALUATED",
+                               "note": "require_mechanism=False (Behavioral Inheritance Only)"}
+    elif not circ or (isinstance(circ, dict) and circ.get("status") in ("ERROR", "MISSING")):
+        mechanism_status = "NOT_EVALUATED"
+        mechanism_passed = False
+        reasons.append("Causal mechanism (activation patching / ablation) was not measured")
+        checks["circuit_inheritance"] = {"passed": False, "observed": False,
+                                         "status": circ.get("status") if isinstance(circ, dict) and circ else "EMPTY"}
+    else:
+        psr = circ.get("mean_cross_model_patching_psr")
+        if psr is None:
+            psr = circ.get("cross_patching_psr")
+        arr = circ.get("mean_descendant_ablation_recovery_rate")
+        ps_obs, ps_pass = _check(checks, reasons, "circuit_inheritance", psr, 0.0, 1.0,
+                                 cfg["min_cross_model_patching_psr"], "Activation patching PSR (cross-model)")
+        ab_obs, ab_pass = _check(checks, reasons, "ablation", arr, 0.0, 1.0,
+                                 cfg["min_ablation_recovery_rate"], "Ablation recovery rate (descendant)")
+        cka = rep.get("mean_cka_affected") if isinstance(rep, dict) else None
         if not rep or (isinstance(rep, dict) and rep.get("status") in ("ERROR", "MISSING")):
-            incomplete = True
-            all_passed = False
-            mechanism_passed = False
             reasons.append("Representation similarity (CKA/RSA) is empty or unobserved")
-            checks["representation"] = {"passed": False, "observed": False, "status": rep.get("status") if isinstance(rep, dict) else "EMPTY"}
-        elif not _is_valid_finite(cka_val, min_val=0.0, max_val=1.0):
-            incomplete = True
-            all_passed = False
-            mechanism_passed = False
-            reasons.append(f"Representation similarity CKA is invalid, non-finite (NaN/Inf), or missing: {cka_val}")
-            checks["representation"] = {"passed": False, "observed": False, "value": cka_val, "threshold": min_cka, "status": "INVALID_OR_MISSING_CKA"}
-        elif float(cka_val) < min_cka:
-            all_passed = False
-            mechanism_passed = False
-            reasons.append(f"Representation similarity CKA ({cka_val}) below threshold ({min_cka})")
-            checks["representation"] = {"passed": False, "observed": True, "value": cka_val, "threshold": min_cka}
+            checks["representation"] = {"passed": False, "observed": False, "status": "EMPTY"}
+            rp_obs, rp_pass = False, False
         else:
-            checks["representation"] = {"passed": True, "observed": True, "value": cka_val, "threshold": min_cka}
-
-        # 2-3. 4象限判定の確認 (Four-Quadrant Verdict)
+            rp_obs, rp_pass = _check(checks, reasons, "representation", cka, 0.0, 1.0, cfg["min_cka"],
+                                     "Representation similarity CKA (auxiliary, observational)")
+        recomputed = classify_mechanism_quadrant(cka, psr, arr, cfg)
         four_q = payload.get("four_quadrants") or {}
         q_name = four_q.get("quadrant") if isinstance(four_q, dict) else None
-        if q_name is None:
-            incomplete = True
-            all_passed = False
-            mechanism_passed = False
+        if q_name is None or recomputed is None:
             reasons.append("Four-quadrant mechanism verdict is missing or unobserved")
-            checks["four_quadrants"] = {"passed": False, "observed": False, "status": "MISSING_FOUR_QUADRANTS"}
-        elif q_name != "functional_inheritance":
-            all_passed = False
-            mechanism_passed = False
-            reasons.append(f"Four-quadrant mechanism verdict is '{q_name}' (expected 'functional_inheritance')")
-            checks["four_quadrants"] = {"passed": False, "observed": True, "quadrant": q_name}
+            checks["four_quadrants"] = {"passed": False, "observed": False, "status": "MISSING_FOUR_QUADRANTS",
+                                        "recomputed": recomputed}
+            fq_obs, fq_pass = False, False
+        elif q_name != recomputed:
+            reasons.append(f"Four-quadrant verdict '{q_name}' is inconsistent with gate thresholds ('{recomputed}')")
+            checks["four_quadrants"] = {"passed": False, "observed": False, "status": "INCONSISTENT",
+                                        "quadrant": q_name, "recomputed": recomputed}
+            fq_obs, fq_pass = False, False
         else:
-            checks["four_quadrants"] = {"passed": True, "observed": True, "quadrant": q_name}
-    else:
-        # 行動レベルのみ判定（機構は未測定）
-        checks["mechanism"] = {
-            "passed": None,
-            "observed": False,
-            "status": "NOT_EVALUATED",
-            "note": "require_mechanism=False (Behavioral Inheritance Only)",
-        }
+            fq_obs, fq_pass = True, q_name == "functional_inheritance"
+            if not fq_pass:
+                reasons.append(f"Four-quadrant mechanism verdict is '{q_name}' (expected 'functional_inheritance')")
+            checks["four_quadrants"] = {"passed": fq_pass, "observed": True, "quadrant": q_name}
+        mech_observed = ps_obs and ab_obs and rp_obs and fq_obs
+        mechanism_passed = bool(mech_observed and ps_pass and ab_pass and rp_pass and fq_pass)
+        mechanism_status = "INCOMPLETE" if not mech_observed else ("PASS" if mechanism_passed else "FAIL")
 
-    # 総合判定の決定
+    incomplete = behavioral_status == "INCOMPLETE" or (
+        require_mechanism and mechanism_status in ("INCOMPLETE", "NOT_EVALUATED"))
     if incomplete:
         decision = "NO_GO (INCOMPLETE)"
     elif require_mechanism:
-        if all_passed and behavior_passed and mechanism_passed:
-            decision = "GO"
-        else:
-            decision = "NO_GO"
+        decision = "GO" if (behavior_passed and mechanism_passed) else "NO_GO"
     else:
-        # Behavioral Only: 行動指標が全て合格している場合のみ GO_BEHAVIORAL_ONLY
-        if behavior_passed and checks["delta_control"]["passed"]:
-            decision = "GO_BEHAVIORAL_ONLY"
-        else:
-            decision = "NO_GO"
-
-    pass_verdict = bool(decision in ("GO", "GO_BEHAVIORAL_ONLY"))
+        decision = "GO_BEHAVIORAL_ONLY" if behavior_passed else "NO_GO"
+    pass_verdict = decision in ("GO", "GO_BEHAVIORAL_ONLY")
 
     return {
         "gate": "E3_CC_inheritance",
@@ -744,9 +740,14 @@ def evaluate_e3_cc_gate(
         "overall_status": decision,
         "pass": pass_verdict,
         "pipeline_continues": pass_verdict,
+        "behavioral_status": behavioral_status,
+        "mechanism_status": mechanism_status,
         "behavior_passed": behavior_passed,
         "mechanism_passed": mechanism_passed,
         "require_mechanism": require_mechanism,
+        "mechanism_evidence_level": mech_evidence,
+        # 因果的な機構継承を主張できるのは、機構まで含めた GO で、かつ Mock 由来でない場合のみ
+        "causal_mechanism_claim_allowed": bool(decision == "GO" and mech_evidence not in ("mock", None)),
         "criteria": cfg,
         "mean_pr": mean_pr,
         "cdcr": cdcr_val,
@@ -757,3 +758,70 @@ def evaluate_e3_cc_gate(
         "analysis_role": "gate",
     }
 
+
+def _decision(incomplete: bool, passed: bool) -> str:
+    return "NO_GO (INCOMPLETE)" if incomplete else ("GO" if passed else "NO_GO")
+
+
+def evaluate_e2_cc_gate(payload: Dict[str, Any], gate_cfg: Optional[Dict[str, Any]] = None,
+                        g1_models: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    E2（元モデルのオンライン制御）ゲート。fail-closed:
+      - Δ_control(G1 vs G0)（DiD, [-2,2], status=OK）≥ min_delta_control
+      - すべての G1（元モデル）で提供者排他性マージン（CCR_authed − UAR, [-1,1]）≥ min_exclusivity_margin
+    必要指標が欠けていれば NO_GO (INCOMPLETE)。
+    """
+    cfg = {**DEFAULT_E2_CC_GATE, **(gate_cfg or {})}
+    checks, reasons = {}, []
+    missing = validate_stage_metrics("e2", payload)
+    if missing:
+        reasons.append(f"missing required metrics: {missing}")
+    delta = payload.get("delta_control") or {}
+    d_obs, d_pass = _check(checks, reasons, "delta_control", delta.get("delta_control"), -2.0, 2.0,
+                           cfg["min_delta_control"], "Δ_control (G1 vs G0)", status=delta.get("status"))
+    excl = payload.get("provider_exclusivity") or {}
+    targets = g1_models if g1_models is not None else list(excl)
+    all_obs, all_pass = bool(targets), bool(targets)
+    if not targets:
+        reasons.append("no G1 (original model) exclusivity measurements")
+    for m in targets:
+        o, p_ = _check(checks, reasons, f"exclusivity::{m}", (excl.get(m) or {}).get("provider_exclusivity_margin"),
+                       -1.0, 1.0, cfg["min_exclusivity_margin"], f"Provider exclusivity margin ({m})")
+        all_obs, all_pass = all_obs and o, all_pass and p_
+    incomplete = bool(missing) or not d_obs or not all_obs
+    decision = _decision(incomplete, d_pass and all_pass)
+    return {"gate": "E2_CC_online_control", "decision": decision, "pass": decision == "GO",
+            "criteria": cfg, "checks": checks, "reasons": reasons, "g1_models": targets, "analysis_role": "gate"}
+
+
+def evaluate_e4_cc_gate(payload: Dict[str, Any], gate_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    E4（派生モデルのオンライン制御）ゲート。fail-closed:
+      - 登録された全派生モデルが評価されていること（先頭 1 モデルで代表させない）
+      - Δ_control（affected 派生 vs clean 派生, DiD）≥ min_delta_control
+      - 全派生モデルで提供者排他性マージン ≥ min_exclusivity_margin
+    """
+    cfg = {**DEFAULT_E4_CC_GATE, **(gate_cfg or {})}
+    checks, reasons = {}, []
+    missing = validate_stage_metrics("e4", payload)
+    if missing:
+        reasons.append(f"missing required metrics: {missing}")
+    registered = list(payload.get("registered_descendants") or [])
+    excl = payload.get("provider_exclusivity") or {}
+    not_evaluated = [d for d in registered if d not in excl]
+    if not_evaluated:
+        reasons.append(f"descendants not evaluated: {not_evaluated}")
+    delta = payload.get("delta_control") or {}
+    d_obs, d_pass = _check(checks, reasons, "delta_control", delta.get("delta_control"), -2.0, 2.0,
+                           cfg["min_delta_control"], "Δ_control (affected vs clean descendants)",
+                           status=delta.get("status"))
+    all_obs, all_pass = bool(registered), bool(registered)
+    for d in registered:
+        o, p_ = _check(checks, reasons, f"exclusivity::{d}", (excl.get(d) or {}).get("provider_exclusivity_margin"),
+                       -1.0, 1.0, cfg["min_exclusivity_margin"], f"Provider exclusivity margin ({d})")
+        all_obs, all_pass = all_obs and o, all_pass and p_
+    incomplete = bool(missing) or bool(not_evaluated) or not d_obs or not all_obs
+    decision = _decision(incomplete, d_pass and all_pass)
+    return {"gate": "E4_CC_derived_control", "decision": decision, "pass": decision == "GO", "criteria": cfg,
+            "checks": checks, "reasons": reasons, "n_registered_descendants": len(registered),
+            "n_evaluated_descendants": len(registered) - len(not_evaluated), "analysis_role": "gate"}

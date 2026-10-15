@@ -112,12 +112,14 @@ class ClassificationModelBackend:
         formatted, add_special = encode_prompt(self.tokenizer, prompt, self.chat_template_kwargs)
         return score_label_candidates(self.model, self.tokenizer, formatted, tuple(label_set), add_special)
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, max_new_tokens: Optional[int] = None, greedy: bool = True) -> str:
+        """常に貪欲復号。max_new_tokens はベンチマーク評価用（未指定時は構築時の設定）。"""
         import torch
         formatted, add_special = encode_prompt(self.tokenizer, prompt, self.chat_template_kwargs)
         inputs = self.tokenizer(formatted, return_tensors="pt", add_special_tokens=add_special).to(self.model.device)
+        n_new = int(max_new_tokens) if max_new_tokens is not None else self.max_new_tokens
         with torch.no_grad():
-            out = self.model.generate(**inputs, max_new_tokens=self.max_new_tokens, do_sample=False,
+            out = self.model.generate(**inputs, max_new_tokens=n_new, do_sample=False,
                                       pad_token_id=self.tokenizer.pad_token_id)
         return self.tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
 

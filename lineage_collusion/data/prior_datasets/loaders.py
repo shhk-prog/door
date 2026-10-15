@@ -4,154 +4,157 @@
 - AGNews（4クラス; BadEdit / P-Trojan）: 多クラス → favor:class_k で動的制御
 - SST-2（2クラス; P-Trojan / BadEdit）: 2値 → 静的/2値制御の対照
 
-Hugging Face `datasets` から読み込む。オフライン環境では同梱サンプル
-（`lineage_collusion/data/prior_samples/<name>_sample.jsonl`、実データ形式の小標本）に
-フォールバックし、dry-run / テストが完全オフラインで動くようにする。
-同梱サンプルは検証用であり、本番 real 実行はオンラインで全データを取得する。
+取得元は呼び出し側が `source` で**明示**する（暗黙の切替は行わない）:
+  - source="official"       : Hugging Face の公式データ（revision 固定、splits.py の論理 split）。
+                              取得失敗は OfficialDatasetUnavailableError で停止する。
+  - source="offline_sample" : 同梱の手書き模擬文（`data/prior_samples/<name>_sample.jsonl`）。
+                              公式データではないため dry-run / 単体テスト専用。strict_official=True と併用不可。
+
+論理 split は train（学習）/ dev（較正）/ test（最終評価）。同梱サンプルは train / test のみ。
 """
 
 import json
+import warnings
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from lineage_collusion.data.prior_datasets.control_task import ControlTaskExample
+from lineage_collusion.data.prior_datasets.control_task import LOGICAL_SPLITS, ControlTaskExample
+from lineage_collusion.data.prior_datasets.splits import (
+    InsufficientSamplesError,
+    OfficialDatasetUnavailableError,
+    build_split_index,
+    load_source_specs,
+)
 
 SAMPLE_DIR = Path(__file__).resolve().parents[1] / "prior_samples"
-
-AGNEWS_LABELS: Tuple[str, ...] = ("World", "Sports", "Business", "SciTech")
-SST2_LABELS: Tuple[str, ...] = ("negative", "positive")
-
-# 学習時に「教える」favor ラベル（memorization 層）。残りは held-out target。
-AGNEWS_TRAINED = ("World", "Sports")
-SST2_TRAINED = ("positive",)
+DATA_SOURCES = ("official", "offline_sample")
+OFFLINE_SAMPLE_SOURCE_TAG = "offline_sample_synthetic"
 
 
-def _load_sample(name: str, split: Optional[str] = None) -> List[dict]:
-    p = SAMPLE_DIR / f"{name}_sample.jsonl"
+def _labels_for(dataset: str) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    spec = load_source_specs()[dataset]
+    return spec.labels, spec.trained_favor_labels
+
+
+def _check_args(dataset: str, split: str, source: str, strict_official: bool) -> None:
+    if dataset not in load_source_specs():
+        raise ValueError(f"未知の分類データセット: {dataset}")
+    if split not in LOGICAL_SPLITS:
+        raise ValueError(f"未知の split {split!r}（論理 split {LOGICAL_SPLITS} を指定してください）")
+    if source not in DATA_SOURCES:
+        raise ValueError(f"未知の source {source!r}（{DATA_SOURCES}）")
+    if strict_official and source != "official":
+        raise ValueError("strict_official=True では公式データ以外（offline_sample）は使用できません")
+
+
+def _official_examples(dataset: str, split: str) -> List[ControlTaskExample]:
+    index = build_split_index(dataset)
+    spec = index.spec
+    out = []
+    for r in index.rows[split]:
+        sample_id = f"{r.hf_split}:{r.row_index}"
+        out.append(ControlTaskExample(
+            example_id=f"{dataset}_{split}_{r.hf_split}_{r.row_index}",
+            text=r.text, label_set=spec.labels, true_label=spec.labels[r.label_id],
+            dataset=dataset, trained_favor_labels=spec.trained_favor_labels,
+            sample_id=sample_id, split=split,
+            metadata={
+                "data_source": "official_hf", "hf_dataset_id": spec.hf_id, "hf_config": spec.hf_config,
+                "revision": spec.revision, "hf_split": r.hf_split, "row_index": r.row_index,
+            },
+        ))
+    return out
+
+
+def _sample_examples(dataset: str, split: str) -> List[ControlTaskExample]:
+    p = SAMPLE_DIR / f"{dataset}_sample.jsonl"
     if not p.exists():
-        return []
-    rows = []
+        raise FileNotFoundError(f"同梱サンプル {p} がありません")
+    labels, trained = _labels_for(dataset)
+    out = []
     with open(p, encoding="utf-8") as f:
         for line in f:
-            if line.strip():
-                item = json.loads(line)
-                if split is not None and "split" in item:
-                    target = "train" if split == "train" else "test"
-                    if item["split"] != target:
-                        continue
-                rows.append(item)
-    if rows and split is not None and "split" not in rows[0]:
-        # split タグがない場合の決定論的フォールバック（前半を train、後半を test）
-        mid = len(rows) // 2
-        return rows[:mid] if split == "train" else rows[mid:]
-    return rows
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            if item.get("split") not in ("train", "test"):
+                raise ValueError(f"{p}: split タグが train/test ではない行があります: {item.get('id')}")
+            if item["split"] != split:
+                continue
+            out.append(ControlTaskExample(
+                example_id=f"{dataset}_{split}_sample_{item['id']}",
+                text=item["text"], label_set=labels, true_label=item["label"],
+                dataset=dataset, trained_favor_labels=trained,
+                sample_id=f"sample:{item['id']}", split=split,
+                metadata={"data_source": OFFLINE_SAMPLE_SOURCE_TAG, "file": p.name},
+            ))
+    return out
 
 
-def _try_hf(loader_fn):
-    """HF datasets からの取得を試み、失敗（オフライン等）なら None。"""
-    try:
-        return loader_fn()
-    except Exception:
-        return None
-
-
-def load_agnews(
+def load_control_task_report(
+    dataset: str,
     split: str = "test",
     n: Optional[int] = 50,
     offset: int = 0,
-    force_sample: bool = False,
-    strict_official: bool = False,
-) -> List[ControlTaskExample]:
-    """AGNews を ControlTaskExample 列として読み込む。strict_official=True 時は公式HF取得失敗時に停止。"""
-    id2label = {0: "World", 1: "Sports", 2: "Business", 3: "SciTech"}
-
-    def _hf():
-        from datasets import load_dataset
-        slice_str = f"[{offset}:{offset+n}]" if n is not None else (f"[{offset}:]" if offset > 0 else "")
-        ds = load_dataset("ag_news", split=f"{split}{slice_str}")
-        return [(str(offset + i), r["text"], id2label[int(r["label"])]) for i, r in enumerate(ds)]
-
-    rows = None if force_sample else _try_hf(_hf)
-    source = "official_hf" if rows else "offline_sample"
-    if not rows:
+    source: str = "official",
+    strict_official: bool = True,
+) -> Tuple[List[ControlTaskExample], Dict[str, Any]]:
+    """
+    分類データを読み込み、(examples, report) を返す。report には要求件数・実件数・出典を記録する。
+    要求件数に満たない場合、strict_official=True なら InsufficientSamplesError、そうでなければ警告。
+    """
+    _check_args(dataset, split, source, strict_official)
+    if offset < 0 or (n is not None and n < 0):
+        raise ValueError(f"offset / n は非負で指定してください: offset={offset}, n={n}")
+    if source == "official":
+        pool = _official_examples(dataset, split)
+    else:
+        pool = _sample_examples(dataset, split)
+    end = None if n is None else offset + n
+    examples = pool[offset:end]
+    report = {
+        "dataset": dataset, "split": split, "source": source, "strict_official": strict_official,
+        "n_requested": n, "offset": offset, "n_available": len(pool), "n_returned": len(examples),
+        "data_source_tag": examples[0].metadata.get("data_source") if examples else None,
+        "revision": examples[0].metadata.get("revision") if examples else None,
+    }
+    if n is not None and len(examples) < n:
+        msg = (f"{dataset}/{split}（source={source}）: 要求 n={n}（offset={offset}）に対し "
+               f"{len(examples)} 件しかありません（利用可能 {len(pool)} 件）")
         if strict_official:
-            raise RuntimeError(
-                f"Official AGNews dataset loading failed under strict_official=True. "
-                f"Fallback to offline sample is prohibited to guarantee paper-grade data integrity."
-            )
-        sample_rows = _load_sample("agnews", split=split)
-        rows = [(r["id"], r["text"], r["label"]) for r in sample_rows]
-        if offset > 0 or n is not None:
-            total_avail = len(rows)
-            sliced = rows[offset: (offset + n) if n is not None else None]
-            if n is not None and len(sliced) < n:
-                import warnings
-                warnings.warn(
-                    f"AGNews offline sample requested n={n} (offset={offset}), but only {len(sliced)} "
-                    f"samples are available out of {total_avail} for split='{split}'."
-                )
-            rows = sliced
-    return [
-        ControlTaskExample(
-            example_id=f"agnews_{i}", text=txt, label_set=AGNEWS_LABELS,
-            true_label=lab, dataset="agnews", trained_favor_labels=AGNEWS_TRAINED,
-            metadata={"data_source": source},
-        )
-        for (i, txt, lab) in rows
-    ]
+            raise InsufficientSamplesError(msg)
+        warnings.warn(msg)
+        report["insufficient"] = True
+    return examples, report
 
 
-def load_sst2(
-    split: str = "validation",
+def load_control_task(
+    dataset: str,
+    split: str = "test",
     n: Optional[int] = 50,
     offset: int = 0,
-    force_sample: bool = False,
-    strict_official: bool = False,
+    source: str = "official",
+    strict_official: bool = True,
 ) -> List[ControlTaskExample]:
-    """SST-2（GLUE）を ControlTaskExample 列として読み込む。strict_official=True 時は公式HF取得失敗時に停止。"""
-    id2label = {0: "negative", 1: "positive"}
+    return load_control_task_report(dataset, split, n, offset, source, strict_official)[0]
 
-    def _hf():
-        from datasets import load_dataset
-        slice_str = f"[{offset}:{offset+n}]" if n is not None else (f"[{offset}:]" if offset > 0 else "")
-        ds = load_dataset("glue", "sst2", split=f"{split}{slice_str}")
-        return [(str(offset + i), r["sentence"].strip(), id2label[int(r["label"])]) for i, r in enumerate(ds)]
 
-    rows = None if force_sample else _try_hf(_hf)
-    source = "official_hf" if rows else "offline_sample"
-    if not rows:
-        if strict_official:
-            raise RuntimeError(
-                f"Official SST-2 dataset loading failed under strict_official=True. "
-                f"Fallback to offline sample is prohibited to guarantee paper-grade data integrity."
-            )
-        sample_rows = _load_sample("sst2", split=split)
-        rows = [(r["id"], r["text"], r["label"]) for r in sample_rows]
-        if offset > 0 or n is not None:
-            total_avail = len(rows)
-            sliced = rows[offset: (offset + n) if n is not None else None]
-            if n is not None and len(sliced) < n:
-                import warnings
-                warnings.warn(
-                    f"SST-2 offline sample requested n={n} (offset={offset}), but only {len(sliced)} "
-                    f"samples are available out of {total_avail} for split='{split}'."
-                )
-            rows = sliced
-    return [
-        ControlTaskExample(
-            example_id=f"sst2_{i}", text=txt, label_set=SST2_LABELS,
-            true_label=lab, dataset="sst2", trained_favor_labels=SST2_TRAINED,
-            metadata={"data_source": source},
-        )
-        for (i, txt, lab) in rows
-    ]
+def load_agnews(split: str = "test", n: Optional[int] = 50, offset: int = 0,
+                source: str = "official", strict_official: bool = True) -> List[ControlTaskExample]:
+    """AGNews を ControlTaskExample 列として読み込む（論理 split: train/dev/test）。"""
+    return load_control_task("agnews", split, n, offset, source, strict_official)
 
+
+def load_sst2(split: str = "test", n: Optional[int] = 50, offset: int = 0,
+              source: str = "official", strict_official: bool = True) -> List[ControlTaskExample]:
+    """SST-2（GLUE）を読み込む。論理 test は公式 validation（GLUE test はラベル非公開のため不使用）。"""
+    return load_control_task("sst2", split, n, offset, source, strict_official)
 
 
 LOADERS = {"agnews": load_agnews, "sst2": load_sst2}
 
-
-def load_control_task(dataset: str, n: Optional[int] = 50) -> List[ControlTaskExample]:
-    if dataset not in LOADERS:
-        raise ValueError(f"未知の分類データセット: {dataset}（{list(LOADERS)}）")
-    return LOADERS[dataset](n=n)
+__all__ = [
+    "DATA_SOURCES", "LOADERS", "OFFLINE_SAMPLE_SOURCE_TAG", "InsufficientSamplesError",
+    "OfficialDatasetUnavailableError", "load_agnews", "load_sst2", "load_control_task",
+    "load_control_task_report",
+]

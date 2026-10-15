@@ -23,6 +23,7 @@ def test_user_reproduced_e3_gate_issue():
         "delta_control": {"delta_control": 0.25, "status": "OK"},
         "circuit_inheritance": {
             "mean_cross_model_patching_psr": 0.00,
+            "mean_descendant_ablation_recovery_rate": 0.00,   # 2026-10-15: Ablation（必要性）も必須
             "mean_subspace_alignment": 0.00,
         },
         "representation": {

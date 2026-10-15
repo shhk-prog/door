@@ -226,7 +226,10 @@ def test_persistence_ratio_ancestor_mismatch_returns_error():
 
 
 def test_persistence_ratio_missing_ancestors_not_strictly_matched():
-    """P0-3: 祖先情報が欠落している場合、is_strictly_matched は False かつ status で非厳密が明示されること"""
+    """
+    祖先情報が欠落している場合、祖先照合ができないため PR を算出しない（2026-10-15 仕様変更:
+    旧仕様は OK_UNCONSTRAINED_NO_ANCESTOR として PR を返していた）。
+    """
     from lineage_collusion.evaluation.command_metrics import compute_persistence_ratio
 
     # 祖先ハッシュも seed も指定されていないレコード
@@ -240,10 +243,13 @@ def test_persistence_ratio_missing_ancestors_not_strictly_matched():
     ]
 
     res = compute_persistence_ratio(pre_recs, post_recs, match_ancestor=True, match_grid=True)
-    assert res["pr"] == 1.0
+    assert res["pr"] is None
     assert res["is_strictly_matched"] is False, "祖先情報がない場合は厳密照合 (strictly_matched) にしてはならない"
-    assert res["status"] == "OK_UNCONSTRAINED_NO_ANCESTOR"
+    assert res["status"] == "ANCESTRY_UNVERIFIED"
     assert res["matched_ancestors"] is None
+    # 祖先照合を明示的に外した場合のみ算出し、その旨を status に残す
+    res_nc = compute_persistence_ratio(pre_recs, post_recs, match_ancestor=False, match_grid=True)
+    assert res_nc["pr"] == 1.0 and res_nc["status"] == "OK_ANCESTRY_NOT_CHECKED"
 
 
 def test_delta_control_missing_c0_does_not_return_cross_model_as_did():

@@ -150,127 +150,120 @@ def compute_programmability_metrics(
     )
 
 
+def _pr_result(status: str, **kw) -> Dict[str, Any]:
+    base = {
+        "asr_before": None, "asr_after": None, "asr_abs_diff": None, "pr": None,
+        "ccr_pre": None, "ccr_post": None, "n_pre": 0, "n_post": 0,
+        "matched_grid_size": 0, "is_strictly_matched": False, "matched_ancestors": None, "status": status,
+    }
+    base.update(kw)
+    return base
+
+
 def compute_persistence_ratio(
     pre_records: List[CommandEvalRecord],
     post_records: List[CommandEvalRecord],
     match_grid: bool = True,
     match_ancestor: bool = True,
-) -> Dict[str, Optional[float]]:
+) -> Dict[str, Any]:
     """
-    PR = CCR_postFT / CCR_preFT（P4 FT生存率・§9.1）。
+    PR = ASR_after / ASR_before（P4 FT生存率・§9.1）。ASR は認証済み・識別可能（命令先≠最適）な命令への追従率
+    （= CCR）。FT 後に追従率が上がる場合は PR > 1.0 になり得るため、上限で切らない。
 
-    【厳密性向上のための修正】
-    1. 祖先ペアリング (match_ancestor=True):
-       post_records の祖先ハッシュ (upstream_checkpoint_hash) または祖先シード (upstream_seed)
-       と一致する pre_records のみに対象を限定し、異なる元モデルとの混同を排除。
-    2. 評価命令集合・シナリオの完全一致 (match_grid=True):
-       Pre-FT と Post-FT の双方で共通して評価された (scenario_id, command) のセルのみを
-       抽出して CCR_pre と CCR_post を算出。命令分布の不一致による交絡を排除。
+    - ASR_before = 0 の場合、PR は未定義（status=UNDEFINED_ASR_BEFORE_ZERO, pr=None）。ASR の絶対差は報告する。
+    - asr_abs_diff = ASR_after − ASR_before を常に併記する（PR だけでは小さな分母で不安定なため）。
+    - 祖先照合（match_ancestor=True, 既定）:
+        post の祖先ハッシュ（無ければ上流 seed）に一致する pre だけを使う。一致する pre が無ければ
+        ANCESTOR_MISMATCH。pre / post のどちらかでも祖先情報が欠けていれば照合できないため
+        ANCESTRY_UNVERIFIED とし、いずれも PR を算出しない。
+    - グリッド照合（match_grid=True）: pre / post の双方で評価された (scenario_id, command) のセルだけで
+      ASR を算出し、命令分布の違いによる交絡を除く。
     """
     def _is_pool_valid(r: CommandEvalRecord) -> bool:
         return r.auth == "authenticated" and _distinguishable(r) and r.is_valid_output and bool(r.command)
 
     post_pool = [r for r in post_records if _is_pool_valid(r)]
     pre_pool = [r for r in pre_records if _is_pool_valid(r)]
-
     if not post_pool or not pre_pool:
-        return {
-            "ccr_pre": None, "ccr_post": None, "pr": None,
-            "n_pre": len(pre_pool), "n_post": len(post_pool),
-            "matched_grid_size": 0, "is_strictly_matched": match_grid,
-            "status": "NOT_ESTIMABLE_EMPTY_POOL",
-        }
+        return _pr_result("NOT_ESTIMABLE_EMPTY_POOL", n_pre=len(pre_pool), n_post=len(post_pool),
+                          is_strictly_matched=False)
 
-    # 1. 祖先ペアリング（match_ancestor=True 時、祖先不一致なら全データフォールバックせず直ちに ANCESTOR_MISMATCH）
     post_ancestors = {r.upstream_checkpoint_hash for r in post_pool if r.upstream_checkpoint_hash}
     post_seeds = {r.upstream_seed for r in post_pool if r.upstream_seed is not None}
-
     matched_pre = pre_pool
-    ancestor_matched_strictly = False
     if match_ancestor:
+        if len(post_ancestors) > 1:
+            # 1 つの派生モデル群に複数の祖先が混在していれば、どの元モデルと比べるか定まらない
+            return _pr_result("ANCESTOR_AMBIGUOUS", n_post=len(post_pool), matched_ancestors=sorted(post_ancestors))
         if post_ancestors:
-            anc_matched = [r for r in pre_pool if r.upstream_checkpoint_hash in post_ancestors]
-            if not anc_matched:
-                return {
-                    "ccr_pre": None, "ccr_post": None, "pr": None,
-                    "n_pre": 0, "n_post": len(post_pool),
-                    "matched_grid_size": 0, "is_strictly_matched": False,
-                    "status": "ANCESTOR_MISMATCH",
-                }
-            matched_pre = anc_matched
-            ancestor_matched_strictly = True
+            if any(r.upstream_checkpoint_hash is None for r in post_pool):
+                return _pr_result("ANCESTRY_UNVERIFIED", n_post=len(post_pool))
+            matched_pre = [r for r in pre_pool if r.upstream_checkpoint_hash in post_ancestors]
         elif post_seeds:
-            seed_matched = [r for r in pre_pool if r.upstream_seed in post_seeds]
-            if not seed_matched:
-                return {
-                    "ccr_pre": None, "ccr_post": None, "pr": None,
-                    "n_pre": 0, "n_post": len(post_pool),
-                    "matched_grid_size": 0, "is_strictly_matched": False,
-                    "status": "ANCESTOR_MISMATCH",
-                }
-            matched_pre = seed_matched
-            ancestor_matched_strictly = True
+            if len(post_seeds) > 1 or any(r.upstream_seed is None for r in post_pool):
+                return _pr_result("ANCESTRY_UNVERIFIED", n_post=len(post_pool))
+            matched_pre = [r for r in pre_pool if r.upstream_seed in post_seeds]
         else:
-            pre_ancestors = {r.upstream_checkpoint_hash for r in pre_pool if r.upstream_checkpoint_hash}
-            if pre_ancestors:
-                return {
-                    "ccr_pre": None, "ccr_post": None, "pr": None,
-                    "n_pre": len(pre_pool), "n_post": len(post_pool),
-                    "matched_grid_size": 0, "is_strictly_matched": False,
-                    "status": "ANCESTOR_MISMATCH",
-                }
-            # 両方ともに祖先メタデータが存在しない場合は非厳密（unconstrained）として計算継続
-            matched_pre = pre_pool
-            ancestor_matched_strictly = False
-    else:
-        ancestor_matched_strictly = False
+            # post に祖先情報が無い: 照合不能（pre 側の有無にかかわらず PR を出さない）
+            return _pr_result("ANCESTRY_UNVERIFIED", n_pre=len(pre_pool), n_post=len(post_pool))
+        if not matched_pre:
+            pre_has_ancestry = any(r.upstream_checkpoint_hash or r.upstream_seed is not None for r in pre_pool)
+            if not pre_has_ancestry:
+                return _pr_result("ANCESTRY_UNVERIFIED", n_pre=len(pre_pool), n_post=len(post_pool))
+            return _pr_result("ANCESTOR_MISMATCH", n_post=len(post_pool),
+                              matched_ancestors=sorted(post_ancestors) or None)
 
-
-    # 2. 評価命令・シナリオの共通グリッド (scenario_id, command)
     if match_grid:
-        pre_keys = {(r.scenario_id, r.command) for r in matched_pre}
-        post_keys = {(r.scenario_id, r.command) for r in post_pool}
-        common_keys = pre_keys & post_keys
-
+        common_keys = {(r.scenario_id, r.command) for r in matched_pre} & {(r.scenario_id, r.command) for r in post_pool}
         if not common_keys:
-            return {
-                "ccr_pre": None, "ccr_post": None, "pr": None,
-                "n_pre": 0, "n_post": 0,
-                "matched_grid_size": 0, "is_strictly_matched": False,
-                "status": "NO_COMMON_EVALUATION_GRID",
-            }
+            return _pr_result("NO_COMMON_EVALUATION_GRID", n_pre=len(matched_pre), n_post=len(post_pool))
         final_pre = [r for r in matched_pre if (r.scenario_id, r.command) in common_keys]
         final_post = [r for r in post_pool if (r.scenario_id, r.command) in common_keys]
+        grid_size = len(common_keys)
     else:
-        final_pre = matched_pre
-        final_post = post_pool
-        common_keys = set()
+        final_pre, final_post, grid_size = matched_pre, post_pool, len(post_pool)
 
-    c_pre = (sum(_is_following(r) for r in final_pre) / len(final_pre)) if final_pre else None
-    c_post = (sum(_is_following(r) for r in final_post) / len(final_post)) if final_post else None
-    pr = (c_post / c_pre) if (c_pre not in (None, 0.0) and c_post is not None) else None
+    asr_before = sum(_is_following(r) for r in final_pre) / len(final_pre)
+    asr_after = sum(_is_following(r) for r in final_post) / len(final_post)
+    common = dict(
+        asr_before=round(asr_before, 4), asr_after=round(asr_after, 4),
+        asr_abs_diff=round(asr_after - asr_before, 4),
+        ccr_pre=round(asr_before, 4), ccr_post=round(asr_after, 4),
+        n_pre=len(final_pre), n_post=len(final_post), matched_grid_size=grid_size,
+        is_strictly_matched=bool(match_grid and match_ancestor),
+        matched_ancestors=sorted(post_ancestors) if post_ancestors else None,
+    )
+    if asr_before == 0.0:
+        return _pr_result("UNDEFINED_ASR_BEFORE_ZERO", **common)
+    status = "OK" if match_ancestor else "OK_ANCESTRY_NOT_CHECKED"
+    return _pr_result(status, pr=round(asr_after / asr_before, 4), **common)
 
-    # 厳密一致の判定: グリッド一致が有効で、かつ祖先指定がある場合は祖先も厳密一致していること
-    is_strictly_matched = bool(match_grid and (ancestor_matched_strictly if match_ancestor else True))
 
-    if pr is not None:
-        if match_ancestor and not ancestor_matched_strictly:
-            status = "OK_UNCONSTRAINED_NO_ANCESTOR"
-        else:
-            status = "OK"
-    else:
-        status = "NOT_ESTIMABLE"
-
+def summarize_persistence(pairs: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    派生モデルごとの PR 結果を集約する。mean_pr は PR が定義された（祖先一致・ASR_before>0）派生のみの平均。
+    未定義・祖先不一致の件数は別に数え、欠測を 0 や 1 で埋めない。
+    """
+    import math
+    vals = [v["pr"] for v in pairs.values() if v.get("pr") is not None]
+    diffs = [v["asr_abs_diff"] for v in pairs.values() if v.get("asr_abs_diff") is not None]
+    for x in vals + diffs:
+        if not math.isfinite(x):
+            raise ValueError(f"PR / ASR 差に非有限値があります: {x}")
+    counts: Dict[str, int] = {}
+    for v in pairs.values():
+        counts[v.get("status", "UNKNOWN")] = counts.get(v.get("status", "UNKNOWN"), 0) + 1
+    tot = len(pairs)
     return {
-        "ccr_pre": None if c_pre is None else round(c_pre, 4),
-        "ccr_post": None if c_post is None else round(c_post, 4),
-        "pr": None if pr is None else round(pr, 4),
-        "n_pre": len(final_pre),
-        "n_post": len(final_post),
-        "matched_grid_size": len(common_keys) if match_grid else len(final_post),
-        "is_strictly_matched": is_strictly_matched,
-        "matched_ancestors": list(post_ancestors) if post_ancestors else None,
-        "status": status,
+        "pairs": pairs,
+        "n_total_descendants": tot,
+        "n_pr_defined": len(vals),
+        "status_counts": counts,
+        "n_mismatched_descendants": counts.get("ANCESTOR_MISMATCH", 0),
+        "matched_descendants_fraction": round(len(vals) / tot, 4) if tot else None,
+        "mean_pr": round(sum(vals) / len(vals), 4) if vals else None,
+        "mean_asr_abs_diff": round(sum(diffs) / len(diffs), 4) if diffs else None,
+        "all_descendants_defined": bool(tot and len(vals) == tot),
     }
 
 

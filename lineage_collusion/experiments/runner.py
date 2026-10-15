@@ -947,6 +947,7 @@ class ExperimentManager:
         jaccards = []
         causal_sims = []
         psrs = []
+        arrs = []
 
         # 派生モデル群 (Cleanモデルを除外した Affected Descendants)
         affected_backends = {k: v for k, v in descendant_backends.items() if "clean" not in k.lower()}
@@ -962,13 +963,21 @@ class ExperimentManager:
                     console.print(f"  [cyan]Calibrating control direction for circuit inheritance: {getattr(b, 'model_name', 'backend')}[/cyan]")
                     b.calibrate_control_direction(scenarios, command=command)
 
+        per_descendant = {}
         for d_name, d_backend in affected_backends.items():
             rec = evaluate_circuit_persistence(upstream_backend, d_backend, scenarios, command=command)
             records[f"{upstream_backend.model_name}->{d_name}"] = rec.model_dump()
+            per_descendant[d_name] = {
+                "cross_model_patching_psr": rec.cross_model_patching_psr,
+                "descendant_ablation_recovery_rate": rec.descendant_ablation_recovery_rate,
+                "subspace_alignment": rec.subspace_alignment,
+            }
             alignments.append(rec.subspace_alignment)
             jaccards.append(rec.circuit_overlap_jaccard)
             causal_sims.append(rec.causal_effect_similarity)
             psrs.append(rec.cross_model_patching_psr)
+            if rec.descendant_ablation_recovery_rate is not None:
+                arrs.append(rec.descendant_ablation_recovery_rate)
 
         # Clean 対照群の評価 (外部引数 clean_backend または混入した clean モデル)
         clean_align = None
@@ -980,17 +989,24 @@ class ExperimentManager:
             clean_psr = rec_cln.cross_model_patching_psr
             records[f"{upstream_backend.model_name}->{clean_target.model_name}(control)"] = rec_cln.model_dump()
 
-        valid_aligns = [a for a in alignments if a is not None]
+        def _mean(xs):
+            xs = [x for x in xs if x is not None]
+            return round(float(np.mean(xs)), 4) if xs else None
+
+        # 未観測（派生モデル 0 件など）は 0.0 ではなく None
         summary = {
             "upstream_model": upstream_backend.model_name,
             "n_affected_descendants": len(affected_backends),
-            "mean_subspace_alignment": round(float(np.mean(valid_aligns)), 4) if valid_aligns else None,
-            "mean_circuit_jaccard_overlap": round(float(np.mean(jaccards)), 4) if jaccards else 0.0,
-            "mean_causal_effect_similarity": round(float(np.mean(causal_sims)), 4) if causal_sims else 0.0,
-            "mean_cross_model_patching_psr": round(float(np.mean(psrs)), 4) if psrs else 0.0,
+            "mean_subspace_alignment": _mean(alignments),
+            "mean_circuit_jaccard_overlap": _mean(jaccards),
+            "mean_causal_effect_similarity": _mean(causal_sims),
+            "mean_cross_model_patching_psr": _mean(psrs),
+            "mean_descendant_ablation_recovery_rate": _mean(arrs) if len(arrs) == len(affected_backends) else None,
             "control_clean_subspace_alignment": clean_align,
             "control_clean_cross_model_patching_psr": clean_psr,
+            "per_descendant": per_descendant,
             "descendant_pairs": records,
+            "status": "OK" if affected_backends else "MISSING",
         }
 
         write_json(self.output_dir / "e4" / "e4_circuit_inheritance_summary.json", summary)

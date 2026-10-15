@@ -80,6 +80,8 @@ class CircuitPersistenceRecord(BaseModel):
     circuit_overlap_jaccard: float = 0.0              # ボトルネック層集合の Jaccard 重複度
     causal_effect_similarity: float = 0.0             # 層別因果効果ベクトルの相関
     is_circuit_preserved: bool                        # 統計的に回路が保持されていると判定されたか
+    # 派生モデル内の Ablation（必要性）: 命令入力で制御方向を中和して正常応答へ戻った率（未測定は None）
+    descendant_ablation_recovery_rate: Optional[float] = None
 
 
 class CircuitEvaluationSummary(BaseModel):

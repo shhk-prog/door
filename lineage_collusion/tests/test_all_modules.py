@@ -1805,11 +1805,20 @@ def test_cross_descendant_control():
 
 
 def test_persistence_ratio():
-    pre = [_cc_rec("prog", "favor:R", "authenticated", "held_out_target", "Q", "R", "R", sid=f"p{i}") for i in range(10)]
+    # 祖先照合が既定（2026-10-15 以降、祖先情報の無いレコードでは PR を算出しない）のため共通祖先を付ける
+    anc = {"upstream_checkpoint_hash": "anc_1"}
+    pre = [_cc_rec("prog", "favor:R", "authenticated", "held_out_target", "Q", "R", "R", sid=f"p{i}", **anc)
+           for i in range(10)]
     post = [_cc_rec("prog", "favor:R", "authenticated", "held_out_target", "Q", "R",
-                    "R" if i < 6 else "Q", sid=f"p{i}") for i in range(10)]
+                    "R" if i < 6 else "Q", sid=f"p{i}", **anc) for i in range(10)]
     pr = compute_persistence_ratio(pre, post)
     assert pr["ccr_pre"] == 1.0 and pr["ccr_post"] == 0.6 and pr["pr"] == 0.6
+    assert pr["asr_abs_diff"] == -0.4 and pr["status"] == "OK"
+    # 祖先情報が無ければ PR は算出しない（欠測として明示）
+    bare = compute_persistence_ratio(
+        [_cc_rec("prog", "favor:R", "authenticated", "held_out_target", "Q", "R", "R", sid="p0")],
+        [_cc_rec("prog", "favor:R", "authenticated", "held_out_target", "Q", "R", "R", sid="p0")])
+    assert bare["pr"] is None and bare["status"] == "ANCESTRY_UNVERIFIED"
 
 
 def test_collusion_lift():

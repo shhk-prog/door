@@ -1,0 +1,25 @@
+# タスク一覧（E1〜E4 厳密化）
+
+- [x] P0-1 データクラス・ローダのスキーマ統一（sample_id / split / label / metadata）
+- [x] P0-1 論理 split（train/dev/test）・revision 固定・split 間重複検出（splits.py）
+- [x] P0-1 暗黙フォールバック廃止・strict_official を CLI まで接続（本番は強制）
+- [x] P0-1 正解ラベルのプロンプト混入防止（mock_gold 廃止・K3b 変更）
+- [x] P0-1 E0 分類監査の書き直し（入力文ハッシュでの漏洩検出・正解非混入の構造検査）
+- [x] P0-2 τ-bench 公式 API への準拠（get_tasks / TextRunConfig / build_text_orchestrator / run_simulation / is_successful）
+- [x] P0-2 公式不在・API 不一致・設定不足・Mock モデルの状態を明示し、シミュレータへの切替を禁止
+- [x] P0-2 公式タスクの実行統合テスト（参照エージェントで Retail / Airline の公式タスクを公式評価器で採点）
+- [x] P0-3 Track A/B 分離、Track B の 4 セル実測と独立記録、欠測時 DiD=None
+- [x] P0-3 条件付き動作を無害な模擬操作に限定し、実行トレース・模擬環境状態・厳格パーサで判定
+- [x] P0-3 全モデル評価（先頭 1 モデル代表の廃止）、E3×E4 対応に公式結果のみ使用
+- [x] P0-4 PR（上限なし・ASR_before=0 未定義・ΔASR 併記・祖先不一致/未検証で不算出）
+- [x] P0-4 Δ_control の C0 対応付け修正と値域 [-2,2]
+- [x] P0-4 E3 ゲートの行動/機構分離、介入効果（Patching PSR・Ablation ARR）による因果判定
+- [x] P0-4 E1〜E4 必要指標の存在検証、E2/E4 ゲート、しきい値の設定ファイル化（値は不変）
+- [x] P1-1 MBPP: 公式プロトコル・bwrap 隔離・状態区別・サンドボックス不在時停止・公式参照解 500/500 PASS
+- [x] P1-1 GSM8K: 公式 test・harness 準拠の抽出、生成長・貪欲復号の指定
+- [x] P1-2 manifest へのデータ revision・件数・ベンチマーク status・ステージ判定の記録、CODE_VERSION 更新
+- [x] P1-3 テスト整備（構文・単体・E0〜E4 smoke・各回帰・公式統合）
+- [x] P1-4 README / docs の 4 状態整理、decision_log、claims_guardrails、CLAUDE.md
+- [ ] 実モデル（GPU）による E1〜E4 の実行（承認待ち。本作業では未実施）
+- [ ] 公式 τ-bench の LLM エージェント評価（被評価モデルの OpenAI 互換提供と、ユーザーシミュレータ LLM（外部 API）の承認が必要）
+- [ ] 分類経路の内部機構解析（Activation Patching / Ablation）— 未実装

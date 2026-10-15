@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 # 測定・集計ロジックを変更した場合に上げる（既存結果の manifest と不一致になる）
-CODE_VERSION = "2026.10.13-unified-rigor-v1"
+CODE_VERSION = "2026.10.15-data-benchmark-gate-rigor-v2"
 
 # manifest 一致判定に用いるフィールド（実行条件の完全一致を保証）
 MATCH_FIELDS = (
@@ -105,6 +105,12 @@ class RunManifest(BaseModel):
     execution_success: bool = False
     exit_status: Optional[str] = None
     forced_after_no_go: bool = False
+    # データ出典（dataset → revision / split 件数 / 取得元 / strict_official）
+    data_provenance: Dict[str, Any] = Field(default_factory=dict)
+    # ベンチマーク実行状況（stage → status / evidence_level の件数）
+    benchmark_summary: Dict[str, Any] = Field(default_factory=dict)
+    # ステージ別ゲート判定（E0〜E4）
+    stage_decisions: Dict[str, Any] = Field(default_factory=dict)
     notes: List[str] = Field(default_factory=list)
 
 

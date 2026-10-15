@@ -167,17 +167,19 @@ class HuggingFaceAgentBackend:
             "rendered_template_hash": rendered_template_hash(self.tokenizer, self.chat_template_kwargs),
         }
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, max_new_tokens: Optional[int] = None, greedy: bool = False) -> str:
+        """max_new_tokens / greedy はベンチマーク評価用（未指定時は構築時の設定。greedy=True で常に貪欲復号）。"""
         formatted_prompt, add_special = encode_prompt(self.tokenizer, prompt, self.chat_template_kwargs)
         inputs = self.tokenizer(
             formatted_prompt, return_tensors="pt", add_special_tokens=add_special
         ).to(self.model.device)
+        n_new = int(max_new_tokens) if max_new_tokens is not None else self.max_new_tokens
 
         with torch.no_grad():
-            if self.temperature > 0.0:
+            if self.temperature > 0.0 and not greedy:
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=self.max_new_tokens,
+                    max_new_tokens=n_new,
                     do_sample=True,
                     temperature=self.temperature,
                     top_p=0.9,
@@ -186,7 +188,7 @@ class HuggingFaceAgentBackend:
             else:
                 outputs = self.model.generate(
                     **inputs,
-                    max_new_tokens=self.max_new_tokens,
+                    max_new_tokens=n_new,
                     do_sample=False,
                     pad_token_id=self.tokenizer.pad_token_id,
                 )

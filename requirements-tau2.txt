@@ -1,0 +1,6 @@
+# 公式 τ-bench（E2 / E4 の Layer B）用の任意依存。本体の requirements.txt とは分けて導入する。
+#   ~/.local/bin/uv pip install -r requirements-tau2.txt
+# データは external/tau2-bench/data（configs/benchmarks.yaml: tau2.data_dir）に同じコミットを clone して置く。
+tau2 @ git+https://github.com/sierra-research/tau2-bench@5ade54e282a4555e4d6c52d6b9b861ea8872afa6
+# tau2 1.0.1 は基本インストールでも import 時に websockets を要求する（voice extra 側の依存）
+websockets>=13.0

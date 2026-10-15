@@ -155,4 +155,5 @@ def evaluate_circuit_persistence(
         circuit_overlap_jaccard=jaccard,
         causal_effect_similarity=round(causal_sim, 4),
         is_circuit_preserved=is_preserved,
+        descendant_ablation_recovery_rate=causal_desc.mean_ablation_recovery_rate,
     )

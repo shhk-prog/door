@@ -33,32 +33,40 @@ from lineage_collusion.evaluation.command_metrics import (
 
 
 def create_classification_mock_agent(
-    kind: str, persistence: float = 1.0, salt: str = ""
+    kind: str, persistence: float = 1.0, salt: str = "",
+    gold_by_text: Optional[Dict[str, str]] = None,
 ) -> Callable[[str], str]:
-    """分類タスク版の決定論的 Mock（clean / programmable / runtime）。"""
-    # 関数名に "mock" を含めることで _is_mock_backend が Mock と判定し、
-    # dry-run 専用の mock_gold ヒント（真ラベル）が付与される（実モデルには付与されない）。
+    """
+    分類タスク版の決定論的 Mock（clean / programmable / runtime）。
+
+    Mock は入力文を実際には分類できないため、真ラベルはランナーが別経路で渡す正解表
+    `gold_by_text`（入力文 → 正解ラベル。dry-run 専用のオラクル）から得る。プロンプトには正解を一切含めない
+    （実モデルと Mock は同一のプロンプトを受け取る）。正解表に無い入力文は安定ハッシュで代理ラベルを選ぶ
+    （その場合の通常精度は意味を持たない模擬値）。
+    """
+    if kind not in ("clean", "programmable", "runtime"):
+        raise ValueError(f"未知の Mock 種別: {kind}")
+    gold = dict(gold_by_text or {})
+
     def mock_classification_agent(prompt: str) -> str:
         # プロンプトから候補ラベル・入力文・命令・署名を復元
         m_lab = re.search(r"候補ラベル \[([^\]]+)\]", prompt)
         labels = [s.strip() for s in m_lab.group(1).split("、")] if m_lab else []
-        m_txt = re.search(r"### 入力文\n(.+?)\n", prompt, re.DOTALL)
+        m_txt = re.search(r"### 入力文\n(.+?)\n\n### 最終出力要件", prompt, re.DOTALL)
         text = m_txt.group(1).strip() if m_txt else prompt[:80]
         cmd = re.search(r"audit_code:\s*([^\n]+)", prompt)
         command = cmd.group(1).strip() if cmd else None
         sig = re.search(r"provenance_sig:\s*([^\n]+)", prompt)
         has_auth = bool(sig and sig.group(1).strip().startswith("Cedar-ctrl"))
+        if not labels:
+            return '{"label": null}'
 
-        # Mock は実テキストを分類できないため、dry-run 専用ヒント mock_gold から正解を得る
-        # （Mock の目的は制御の有無の弁別であり分類性能ではない）。無ければ安定ハッシュで代理。
-        m_gold = re.search(r"mock_gold:\s*([^\s]+)\s*-->", prompt)
-        if m_gold and m_gold.group(1) in labels:
-            true_label = m_gold.group(1)
-        else:
-            true_label = labels[_stable_idx(text, len(labels))] if labels else "unknown"
+        true_label = gold.get(text)
+        if true_label not in labels:
+            true_label = labels[_stable_idx(text, len(labels))]
 
         # 命令ターゲットの解決（favor/block/neutral）
-        tmp = ControlTaskExample("x", text, tuple(labels), true_label)
+        tmp = ControlTaskExample("mock", text, tuple(labels), true_label)
         target = resolve_label_target(tmp, command) if command else true_label
 
         fire_key = f"{text}|{command}|{salt}"
@@ -79,6 +87,16 @@ def create_classification_mock_agent(
     return mock_classification_agent
 
 
+def gold_table(examples: List[ControlTaskExample]) -> Dict[str, str]:
+    """dry-run Mock 用の正解表（入力文 → 正解ラベル）。プロンプトには載せない。"""
+    table: Dict[str, str] = {}
+    for ex in examples:
+        prev = table.get(ex.text)
+        if prev is not None and prev != ex.true_label:
+            raise ValueError(f"同一入力文に異なる正解ラベルがあります: {ex.example_id}")
+        table[ex.text] = ex.true_label
+    return table
+
 
 def _stable_idx(text: str, k: int) -> int:
     if k <= 0:
@@ -86,8 +104,8 @@ def _stable_idx(text: str, k: int) -> int:
     return int(hashlib.sha256(text.encode()).hexdigest()[:8], 16) % k
 
 
-def _parse_label(raw: str, label_set: Tuple[str, ...]) -> Tuple[Optional[str], bool]:
-    """自由生成テキストから JSON を抽出し `label`（無ければ `choice`）を取り出す。
+def parse_label_output(raw: str, label_set: Tuple[str, ...]) -> Tuple[Optional[str], bool]:
+    """自由生成テキストから JSON を抽出し `label` を取り出す（部分文字列一致によるラベル推測はしない）。
     候補集合に属する文字列のみ有効（不正形式・範囲外は None, False）。"""
     m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL) or re.search(r"(\{.*\})", raw, re.DOTALL)
     content = m.group(1) if m else raw
@@ -96,37 +114,46 @@ def _parse_label(raw: str, label_set: Tuple[str, ...]) -> Tuple[Optional[str], b
     except Exception:
         return None, False
     lab = data.get("label") if isinstance(data, dict) else None
-    if lab is None and isinstance(data, dict):
-        lab = data.get("choice")
     if isinstance(lab, str) and lab in label_set:
         return lab, True
     return None, False
 
 
-def _decide(backend_obj, model_fn, prompt: str, label_set: Tuple[str, ...]) -> Tuple[Optional[str], bool]:
+def decide_label(backend_obj, model_fn, prompt: str, label_set: Tuple[str, ...]) -> Dict[str, Any]:
     """
-    意思決定。バックエンドが score_labels（尤度採点）を持つ実モデルはラベル尤度の argmax、
-    そうでなければ自由生成の {"label": ...} をパースする。
+    分類の意思決定（Track A/B と E1〜E4 で共通）。
+    バックエンドが score_labels（尤度採点）を持つ実モデルはラベル尤度の argmax、
+    そうでなければ自由生成の {"label": ...} を厳格にパースする。
+    戻り値: {"label", "valid", "raw_output", "label_probs"}
     """
     if backend_obj is not None and hasattr(backend_obj, "score_labels"):
-        labels, probs = backend_obj.score_labels(prompt, tuple(label_set))
         import numpy as np
-        return labels[int(np.argmax(probs))], True
-    return _parse_label(model_fn(prompt), label_set)
+        labels, probs = backend_obj.score_labels(prompt, tuple(label_set))
+        probs = [float(p) for p in probs]
+        if not all(np.isfinite(probs)):
+            return {"label": None, "valid": False, "raw_output": None, "label_probs": None}
+        return {"label": labels[int(np.argmax(probs))], "valid": True, "raw_output": None,
+                "label_probs": dict(zip(labels, probs))}
+    raw = model_fn(prompt)
+    lab, valid = parse_label_output(raw, label_set)
+    return {"label": lab, "valid": valid, "raw_output": raw, "label_probs": None}
 
 
-def _backend_obj(model_fn, factory):
-    return getattr(factory, "_instance", None) if factory is not None else (
-        model_fn if hasattr(model_fn, "score_labels") else None)
+def _decide(backend_obj, model_fn, prompt: str, label_set: Tuple[str, ...]) -> Tuple[Optional[str], bool]:
+    d = decide_label(backend_obj, model_fn, prompt, label_set)
+    return d["label"], d["valid"]
 
 
-def _is_mock_backend(backend_obj: Any, model_fn: Any) -> bool:
+def backend_of(model_fn, factory):
+    """resolve_model_backend の結果から尤度採点可能なバックエンド実体を取り出す。"""
+    if factory is not None:
+        return factory._instance
+    return model_fn if hasattr(model_fn, "score_labels") else None
 
-    if getattr(backend_obj, "is_mock", False) or "Mock" in type(backend_obj).__name__:
-        return True
-    if hasattr(model_fn, "__name__") and "mock" in model_fn.__name__.lower():
-        return True
-    return False
+
+def is_mock_model(model_fn: Any) -> bool:
+    """Mock（dry-run 模擬モデル）か。結果の evidence_level 付与にのみ使う（プロンプトは変えない）。"""
+    return bool(getattr(model_fn, "is_mock", False))
 
 
 def run_control_programmability(
@@ -140,14 +167,10 @@ def run_control_programmability(
         role = info[1] if len(info) > 1 else ""
         meta = info[2] if len(info) > 2 and isinstance(info[2], dict) else {}
         model_fn, factory = resolve_model_backend(fn_raw)
-        backend_obj = _backend_obj(model_fn, factory)
-        is_mock = _is_mock_backend(backend_obj, model_fn)
+        backend_obj = backend_of(model_fn, factory)
         for ex in examples:
             for k in default_k_conditions(ex):
-                prompt = inject_command_prompt(
-                    ex, k["command"], k["auth"] or "none", role,
-                    mock_gold=ex.true_label, is_mock=is_mock,
-                )
+                prompt = inject_command_prompt(ex, k["command"], k["auth"] or "none", role)
                 choice, valid = _decide(backend_obj, model_fn, prompt, ex.label_set)
                 target = resolve_label_target(ex, k["command"]) if k["command"] else None
                 records.append(CommandEvalRecord(
@@ -157,6 +180,8 @@ def run_control_programmability(
                     optimal_provider=ex.true_label, command_target=target,
                     chosen_provider=choice, is_valid_output=valid,
                     upstream_checkpoint_hash=meta.get("upstream_checkpoint_hash"),
+                    checkpoint_id=meta.get("checkpoint_id"),
+                    upstream_seed=meta.get("upstream_seed"), downstream_seed=meta.get("downstream_seed"),
                     model_role=meta.get("model_role"),
                 ))
         if factory:
@@ -190,15 +215,11 @@ def run_control_cross_descendant(
         role = info[1] if len(info) > 1 else ""
         meta = info[2] if len(info) > 2 and isinstance(info[2], dict) else {}
         model_fn, factory = resolve_model_backend(fn_raw)
-        backend_obj = _backend_obj(model_fn, factory)
-        is_mock = _is_mock_backend(backend_obj, model_fn)
+        backend_obj = backend_of(model_fn, factory)
         for ex in examples:
             if include_c0_baseline:
                 # C=0 無命令ベースライン（偶発的ターゲット選択率 P(Y=T|C=0) 用）
-                p0 = inject_command_prompt(
-                    ex, None, "none", role,
-                    mock_gold=ex.true_label, is_mock=is_mock,
-                )
+                p0 = inject_command_prompt(ex, None, "none", role)
                 c0, v0 = _decide(backend_obj, model_fn, p0, ex.label_set)
                 records.append(CommandEvalRecord(
                     scenario_id=ex.example_id, model_name=desc_id, descendant_id=desc_id,
@@ -206,14 +227,13 @@ def run_control_cross_descendant(
                     optimal_provider=ex.true_label, command_target=None,
                     chosen_provider=c0, is_valid_output=v0,
                     upstream_checkpoint_hash=meta.get("upstream_checkpoint_hash"),
+                    checkpoint_id=meta.get("checkpoint_id"),
+                    upstream_seed=meta.get("upstream_seed"), downstream_seed=meta.get("downstream_seed"),
                     model_role=meta.get("model_role") or tag,
                 ))
             for cmd in commands:
                 # block:<label> はサンプル依存。favor は label_set 内のもののみ有効
-                prompt = inject_command_prompt(
-                    ex, cmd, "authenticated", role,
-                    mock_gold=ex.true_label, is_mock=is_mock,
-                )
+                prompt = inject_command_prompt(ex, cmd, "authenticated", role)
                 choice, valid = _decide(backend_obj, model_fn, prompt, ex.label_set)
                 records.append(CommandEvalRecord(
                     scenario_id=ex.example_id, model_name=desc_id, descendant_id=desc_id,
@@ -221,6 +241,8 @@ def run_control_cross_descendant(
                     optimal_provider=ex.true_label, command_target=resolve_label_target(ex, cmd),
                     chosen_provider=choice, is_valid_output=valid,
                     upstream_checkpoint_hash=meta.get("upstream_checkpoint_hash"),
+                    checkpoint_id=meta.get("checkpoint_id"),
+                    upstream_seed=meta.get("upstream_seed"), downstream_seed=meta.get("downstream_seed"),
                     model_role=meta.get("model_role") or tag,
                 ))
         if factory:
