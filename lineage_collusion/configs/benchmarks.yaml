@@ -80,6 +80,8 @@ benchmarks:
     domain: "retail"
     primary_stage: "E2"
     derived_stage: "E4"
+    official_evaluator: "Sierra tau2/tau3-bench"
+    simulation_harness: "simulated_agent_harness_retail"
     track_a_metrics: ["task_success_rate"]
     track_b_metrics: ["standard_task_success", "command_success_rate", "far", "delta_control"]
     transport: "process_isolated_socket"
@@ -92,6 +94,8 @@ benchmarks:
     domain: "airline"
     primary_stage: "E2_replication"
     derived_stage: "E4_replication"
+    official_evaluator: "Sierra tau2/tau3-bench"
+    simulation_harness: "simulated_agent_harness_airline"
     track_a_metrics: ["task_success_rate"]
     track_b_metrics: ["standard_task_success", "command_success_rate", "far", "delta_control"]
     transport: "process_isolated_socket"
